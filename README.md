@@ -2,11 +2,12 @@
 
 这是一个用于VRChat的自动钓鱼程序，通过监控VRChat日志文件来检测鱼上钩事件，并自动执行钓鱼操作。
 
-![软件截图](1.png)
+![软件截图](img/1.png)
 
 ## 🎯 适用世界
 
 本工具适用于VRChat钓鱼世界：
+
 - **世界链接**: [VRChat钓鱼世界](https://vrchat.com/home/world/wrld_ab93c6a0-d158-4e07-88fe-f8f222018faa)
 - **世界ID**: `wrld_ab93c6a0-d158-4e07-88fe-f8f222018faa`
 
@@ -15,6 +16,7 @@
 本项目基于 [arcxingye/AutoFisher-VRC](https://github.com/arcxingye/AutoFisher-VRC) 原始代码改进开发，添加了更多功能和更好的用户体验。
 
 ### 原始项目
+
 - **仓库**: [AutoFisher-VRC](https://github.com/arcxingye/AutoFisher-VRC)
 - **作者**: arcxingye
 - **许可证**: MIT
@@ -33,42 +35,34 @@
 - 🖥️ 现代化GUI界面
 - 📊 实时统计信息显示
 
-### 方法二：从源码运行
+## 使用方法
+
+### 1. 使用exe启动
+
+直接运行Releases的`VRChatAutoFishing.exe`文件。
+
+### 2. 从源码运行
 
 1. 克隆仓库
-```bash
-git clone https://github.com/your-username/vrchat-auto-fishing.git
-cd vrchat-auto-fishing
-```
+   
+   ```bash
+   git clone https://github.com/gujimy/VRChatAutoFishing.git
+   cd VRChatAutoFishing
+   ```
 
 2. 安装依赖
-```bash
-pip install -r requirements.txt
-```
+   
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 3. 运行程序
-```bash
-python auto_fishing_gui.py
-```
+   
+   ```bash
+   python auto_fishing_gui.py
+   ```
 
-## 依赖管理
-
-本项目提供了多种依赖管理方式：
-
-### 方式一：使用requirements.txt（推荐）
-```bash
-pip install -r requirements.txt
-```
-
-### 方式二：使用setup.py
-```bash
-pip install -e .
-```
-
-### 方式三：手动安装
-```bash
-pip install python-osc watchdog pynput pillow pystray
-```
+## 基本操作
 
 1. **启动程序** - 运行exe文件或Python脚本
 2. **调整参数** - 根据需要调整蓄力时间、休息时间等
@@ -92,29 +86,32 @@ pip install python-osc watchdog pynput pillow pystray
 ## 📁 项目结构
 
 ```
-vrchat-auto-fishing/
+VRChatAutoFishing/
 ├── auto_fishing_gui.py      # 主程序文件
 ├── requirements.txt         # Python依赖
-├── build.bat               # 编译脚本
-├── auto_fishing_gui.spec   # PyInstaller配置
-├── ico.ico                 # 程序图标
-├── README.md               # 说明文档
-└── .gitignore              # Git忽略文件
+├── build.bat                # 编译脚本
+├── auto_fishing_gui.spec    # PyInstaller配置
+├── ico.ico                  # 程序图标
+├── README.md                # 说明文档
+└── .gitignore               # Git忽略文件
 ```
 
 ## 新功能说明
 
 ### 随机蓄力时间
+
 - 勾选"随机蓄力时间"复选框启用
 - 设置随机蓄力时间的最大值（最小值固定为0.2秒）
 - 每次抛竿时会在0.2秒到设定最大值之间随机选择蓄力时间
 
 ### 快捷键
+
 - **F4**: 显示/隐藏程序窗口
 - **F5**: 开始钓鱼
 - **F6**: 停止钓鱼
 
 ### 任务栏图标
+
 - 程序运行时会在任务栏显示图标
 - 关闭窗口时程序会最小化到任务栏继续运行
 - 右键点击任务栏图标可以：
@@ -133,6 +130,7 @@ vrchat-auto-fishing/
 ## 配置说明
 
 ### 钓鱼参数
+
 - **蓄力时间**: 抛竿时的蓄力时间（0.2-2.0秒）
 - **休息时间**: 每次钓鱼之间的休息时间（0.1-10.0秒）
 - **超时时间**: 等待鱼上钩的超时时间（1.0-15.0分钟）
@@ -140,6 +138,7 @@ vrchat-auto-fishing/
 - **随机最大值**: 随机蓄力时间的最大值（0.3-2.0秒）
 
 ### OSC设置
+
 - `OSC_HOST`: OSC服务器地址（默认127.0.0.1）
 - `OSC_PORT`: OSC服务器端口（默认9000）
 
@@ -162,10 +161,12 @@ vrchat-auto-fishing/
 欢迎提交Issue和Pull Request！
 
 4. **快捷键不工作**：
+   
    - 确保已安装pynput库：`pip install pynput`
    - 某些系统可能需要管理员权限
 
 5. **任务栏图标不显示**：
+   
    - 确保已安装pillow和pystray库：`pip install pillow pystray`
    - 某些系统可能需要管理员权限
 
@@ -190,4 +191,4 @@ vrchat-auto-fishing/
 
 - 🌐 **VRChat钓鱼世界**: [https://vrchat.com/home/world/wrld_ab93c6a0-d158-4e07-88fe-f8f222018faa](https://vrchat.com/home/world/wrld_ab93c6a0-d158-4e07-88fe-f8f222018faa)
 - 📚 **原始项目**: [https://github.com/arcxingye/AutoFisher-VRC](https://github.com/arcxingye/AutoFisher-VRC)
-- 📺 **使用教程**: [B站视频教程](https://www.bilibili.com/video/BV1TqotYrEDe) 
+- 📺 **使用教程**: [B站视频教程](https://www.bilibili.com/video/BV1TqotYrEDe)
