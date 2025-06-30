@@ -1,7 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import os
 import time
 import threading
 import random
+import sys
 from tkinter import *
 from tkinter import ttk
 from pythonosc import udp_client
@@ -24,6 +28,12 @@ except ImportError:
     PIL_AVAILABLE = False
     PYSTRAY_AVAILABLE = False
     print("警告: PIL或pystray模块未安装，任务栏图标功能将不可用")
+
+def resource_path(relative_path):
+    """获取资源文件打包后的绝对路径（兼容PyInstaller）"""
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 
 class VRChatLogHandler(FileSystemEventHandler):
     def __init__(self, callback):
@@ -173,9 +183,23 @@ class AutoFishingApp:
         
         # 设置窗口图标（使用自定义ico文件）
         try:
-            if os.path.exists("ico.ico"):
-                self.root.iconbitmap("ico.ico")
-                print("使用自定义图标: ico.ico")
+            ico_path = resource_path("ico.ico")
+            if os.path.exists(ico_path):
+                # 确保任务栏图标和窗口图标一致
+                self.root.iconbitmap(default=ico_path)  # 设置任务栏图标
+                self.root.iconbitmap(ico_path)  # 设置窗口图标
+                
+                # 在Windows上，还需要设置WM_CLASS属性来影响任务栏图标
+                if os.name == 'nt':  # Windows系统
+                    try:
+                        # 获取窗口句柄并设置应用程序ID
+                        import ctypes
+                        myappid = 'VRChatAutoFishing.1.0'  # 任意字符串，但需要唯一
+                        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+                    except Exception as e:
+                        print(f"设置应用ID失败: {e}")
+                
+                print(f"使用自定义图标: {ico_path}")
             elif PIL_AVAILABLE:
                 # 如果没有ico文件，使用PIL生成的图标作为备选
                 icon_image = self.create_icon_image(self.icon_colors["等待"])
