@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vrchat-auto-fishing"
+version = "2.0.0"
+description = "VRChat自动钓鱼程序 - 基于日志监控和OSC控制的自动化工具"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "arcxingye", email = ""},
+]
+maintainers = [
+    {name = "改进版本开发者", email = ""},
+]
+keywords = ["vrchat", "fishing", "automation", "osc", "gui"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Games/Entertainment",
+    "Topic :: Utilities",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "python-osc>=1.9.0",
+    "watchdog>=3.0.0",
+    "pynput>=1.7.0",
+    "pillow>=10.0.0",
+    "pystray>=0.19.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pyinstaller>=6.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/arcxingye/AutoFisher-VRC"
+Repository = "https://github.com/arcxingye/AutoFisher-VRC"
+"Bug Tracker" = "https://github.com/arcxingye/AutoFisher-VRC/issues"
+
+[project.scripts]
+vrchat-auto-fishing = "auto_fishing_gui:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
+exclude = ["build*", "dist*", "*.egg-info*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.txt", "*.md", "*.bat"] 

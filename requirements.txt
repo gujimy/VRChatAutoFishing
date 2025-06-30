@@ -1,0 +1,12 @@
+# VRChat 自动钓鱼程序依赖包
+# 基础依赖
+python-osc>=1.9.0
+watchdog>=3.0.0
+
+# 新增功能依赖
+pynput>=1.7.0
+pillow>=10.0.0
+pystray>=0.19.0
+
+# 可选依赖（用于编译exe）
+# pyinstaller>=6.0.0 
