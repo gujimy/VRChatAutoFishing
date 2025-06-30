@@ -102,7 +102,7 @@ class VRChatLogHandler(FileSystemEventHandler):
                 
             content = self.safe_read_file()
             if "SAVED DATA" in content:
-                self.callback()
+                self.callback(content)
 
     def start_monitor(self):
         self.observer = Observer()
@@ -113,6 +113,9 @@ class VRChatLogHandler(FileSystemEventHandler):
         self.check_thread.start()
 
 class AutoFishingApp:
+    # 定义版本号常量
+    VERSION = "2.1"
+    
     def __init__(self, root):
         self.root = root
         self.running = False
@@ -124,8 +127,9 @@ class AutoFishingApp:
         
         # 参数变量
         self.cast_time_var = DoubleVar(value=0.2)  # 默认0.2秒
-        self.rest_time_var = DoubleVar(value=0.1)  # 默认0.1秒
-        self.timeout_limit_var = DoubleVar(value=2.5)  # 默认2.5分钟
+        self.rest_time_var = DoubleVar(value=0.5)  # 默认0.5秒
+        self.timeout_limit_var = DoubleVar(value=1.0)  # 默认1.0分钟
+        self.rest_enabled = BooleanVar(value=False)  # 是否启用休息时间，默认不启用
         
         # 随机蓄力时间相关变量
         self.random_cast_enabled = BooleanVar(value=False)  # 是否启用随机蓄力时间
@@ -139,6 +143,7 @@ class AutoFishingApp:
             "鱼竿蓄力中": "#FF4500",  # 红色
             "等待鱼上钩": "#00FF00",  # 绿色
             "收杆中": "#FFD700",  # 金色
+            "等待鱼装桶": "#9370DB",  # 紫色
             "休息中": "#87CEEB",  # 天蓝色
             "超时收杆": "#FF6347",  # 番茄色
             "已停止": "#808080"  # 灰色
@@ -177,8 +182,8 @@ class AutoFishingApp:
         self.update_status()
 
     def setup_ui(self):
-        self.root.title("自动钓鱼v2.0")
-        self.root.geometry("400x650")
+        self.root.title(f"自动钓鱼 v{self.VERSION}")
+        self.root.geometry("500x700")  # 增加窗口宽度和高度
         self.root.resizable(False, False)
         
         # 设置窗口图标（使用自定义ico文件）
@@ -194,7 +199,7 @@ class AutoFishingApp:
                     try:
                         # 获取窗口句柄并设置应用程序ID
                         import ctypes
-                        myappid = 'VRChatAutoFishing.1.0'  # 任意字符串，但需要唯一
+                        myappid = f'VRChatAutoFishing.{self.VERSION}'  # 使用当前版本号
                         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
                     except Exception as e:
                         print(f"设置应用ID失败: {e}")
@@ -219,10 +224,20 @@ class AutoFishingApp:
         main_frame = Frame(self.root)
         main_frame.pack(fill=BOTH, expand=True, padx=10, pady=10)
         
-        # 标题
-        title_label = Label(main_frame, text="🎣 VRChat 自动钓鱼", 
+        # 标题栏（包含标题、版本号和日期）
+        title_frame = Frame(main_frame)
+        title_frame.pack(fill=X, pady=(0, 15))
+        
+        # 主标题
+        title_label = Label(title_frame, text="🎣 VRChat 自动钓鱼", 
                            font=("Arial", 16, "bold"))
-        title_label.pack(pady=(0, 20))
+        title_label.pack(side=LEFT, padx=(0, 10))
+        
+        # 版本号和更新日期（与标题同行，靠右对齐）
+        update_date = "2025-07-01"
+        version_label = Label(title_frame, text=f"v{self.VERSION} ({update_date})", 
+                             font=("Arial", 9), fg="gray")
+        version_label.pack(side=RIGHT, pady=5)
         
         # 参数设置框架
         params_frame = LabelFrame(main_frame, text="⚙️ 参数设置", padx=10, pady=10)
@@ -239,26 +254,35 @@ class AutoFishingApp:
         self.cast_label = Label(cast_frame, text="0.2秒", width=8)
         self.cast_label.pack(side=RIGHT, padx=(5, 0))
         
+        # 休息时间设置
+        rest_enable_frame = Frame(params_frame)
+        rest_enable_frame.pack(fill=X, pady=3)
+        self.rest_enabled_check = Checkbutton(rest_enable_frame, text="启用休息时间(不检测鱼装桶)", 
+                                             variable=self.rest_enabled,
+                                             command=self.on_rest_enabled_toggle)
+        self.rest_enabled_check.pack(side=LEFT)
+        
         # 休息时间滑块
         rest_frame = Frame(params_frame)
         rest_frame.pack(fill=X, pady=5)
         Label(rest_frame, text="休息时间:", width=10, anchor=W).pack(side=LEFT)
         self.rest_scale = Scale(rest_frame, from_=0.1, to=10.0, resolution=0.1,
                                orient=HORIZONTAL, variable=self.rest_time_var,
-                               command=self.on_rest_time_change)
+                               command=self.on_rest_time_change, 
+                               state=DISABLED)
         self.rest_scale.pack(side=LEFT, fill=X, expand=True, padx=(5, 0))
-        self.rest_label = Label(rest_frame, text="0.1秒", width=8)
+        self.rest_label = Label(rest_frame, text="0.5秒", width=8, fg="gray")
         self.rest_label.pack(side=RIGHT, padx=(5, 0))
         
         # 超时时间滑块
         timeout_frame = Frame(params_frame)
         timeout_frame.pack(fill=X, pady=5)
         Label(timeout_frame, text="超时时间:", width=10, anchor=W).pack(side=LEFT)
-        self.timeout_scale = Scale(timeout_frame, from_=1.0, to=15.0, resolution=0.5,
+        self.timeout_scale = Scale(timeout_frame, from_=0.5, to=15.0, resolution=0.5,
                                    orient=HORIZONTAL, variable=self.timeout_limit_var,
                                    command=self.on_timeout_change)
         self.timeout_scale.pack(side=LEFT, fill=X, expand=True, padx=(5, 0))
-        self.timeout_label = Label(timeout_frame, text="2.5分钟", width=8)
+        self.timeout_label = Label(timeout_frame, text="1.0分钟", width=8)
         self.timeout_label.pack(side=RIGHT, padx=(5, 0))
         
         # 随机蓄力时间选项
@@ -283,13 +307,13 @@ class AutoFishingApp:
         self.random_max_label.pack(side=RIGHT, padx=(5, 0))
         
         # 控制框架
-        control_frame = LabelFrame(main_frame, text="🎮 控制面板", padx=10, pady=10)
-        control_frame.pack(fill=X, pady=(0, 10))
+        control_frame = LabelFrame(main_frame, text="🎮 控制面板", padx=15, pady=15)
+        control_frame.pack(fill=X, pady=(0, 15))
         
         # 开始/停止按钮
         self.start_btn = Button(control_frame, text="开始", command=self.toggle, 
-                               width=15, height=2, font=("Arial", 12, "bold"))
-        self.start_btn.pack(pady=5)
+                               width=20, height=2, font=("Arial", 12, "bold"))
+        self.start_btn.pack(pady=10)
         
         # 状态显示
         status_frame = Frame(control_frame)
@@ -311,20 +335,36 @@ class AutoFishingApp:
         stats_frame = LabelFrame(main_frame, text="📊 统计信息", padx=10, pady=10)
         stats_frame.pack(fill=X, pady=(0, 10))
         
+        # 创建左右两列统计信息
+        left_stats_frame = Frame(stats_frame)
+        left_stats_frame.pack(side=LEFT, fill=X, expand=True)
+        
+        right_stats_frame = Frame(stats_frame)
+        right_stats_frame.pack(side=RIGHT, fill=X, expand=True)
+        
         # 统计标签
         self.stats_labels = {}
         stats_data = [
             ("抛竿次数", "casts", "0"),
             ("收杆次数", "reels", "0"),
+            ("装桶次数", "bucket_success", "0"),
             ("超时次数", "timeouts", "0"),
             ("运行时间", "runtime", "0秒")
         ]
         
+        # 将统计信息分成左右两列显示
+        half = len(stats_data) // 2 + len(stats_data) % 2
         for i, (name, key, default) in enumerate(stats_data):
-            frame = Frame(stats_frame)
-            frame.pack(fill=X, pady=2)
-            Label(frame, text=f"{name}:", width=10, anchor=W).pack(side=LEFT)
-            self.stats_labels[key] = Label(frame, text=default, width=15, anchor=W)
+            # 选择显示在左列还是右列
+            parent_frame = left_stats_frame if i < half else right_stats_frame
+            
+            # 为每个项目创建一个框架
+            item_frame = Frame(parent_frame)
+            item_frame.pack(fill=X, pady=2)
+            
+            # 添加标签和值
+            Label(item_frame, text=f"{name}:", width=12, anchor=W).pack(side=LEFT)
+            self.stats_labels[key] = Label(item_frame, text=default, width=12, anchor=W)
             self.stats_labels[key].pack(side=LEFT, padx=(5, 0))
         
         # 初始化统计
@@ -332,13 +372,17 @@ class AutoFishingApp:
             'casts': 0,
             'reels': 0,
             'timeouts': 0,
+            'bucket_success': 0,  # 成功装桶次数
             'start_time': None
         }
         
         # 版权信息
-        copyright_label = Label(main_frame, text="[开发者arcxingye]", 
+        bottom_frame = Frame(main_frame)
+        bottom_frame.pack(side=BOTTOM, fill=X, pady=(10, 0))
+        
+        copyright_label = Label(bottom_frame, text="[laomo]", 
                                font=("Arial", 8), fg="gray")
-        copyright_label.pack(side=BOTTOM, pady=(10, 0))
+        copyright_label.pack(side=LEFT)
 
     def on_cast_time_change(self, value):
         """蓄力时间改变回调"""
@@ -358,6 +402,15 @@ class AutoFishingApp:
             self.random_max_scale.config(state=NORMAL)
         else:
             self.random_max_scale.config(state=DISABLED)
+
+    def on_rest_enabled_toggle(self):
+        """休息时间启用/禁用回调"""
+        if self.rest_enabled.get():
+            self.rest_scale.config(state=NORMAL)
+            self.rest_label.config(fg="black")
+        else:
+            self.rest_scale.config(state=DISABLED)
+            self.rest_label.config(fg="gray")
 
     def on_random_max_change(self, value):
         """随机最大值改变回调"""
@@ -415,8 +468,8 @@ class AutoFishingApp:
             pystray.MenuItem("退出程序", self.quit_from_tray)
         )
         
-        # 创建任务栏图标，提示文字显示当前状态
-        self.tray_icon = pystray.Icon("auto_fishing", icon_image, "自动钓鱼 - 等待", menu)
+        # 创建任务栏图标，提示文字显示当前状态和收杆次数
+        self.tray_icon = pystray.Icon("auto_fishing", icon_image, f"自动钓鱼 v{self.VERSION} - 等待 | 收杆: 0 | 装桶: 0", menu)
         
         # 设置单击事件（显示/隐藏窗口）
         self.tray_icon.on_click = self.on_tray_click
@@ -455,8 +508,10 @@ class AutoFishingApp:
             new_icon_image = self.create_icon_image(color)
             self.tray_icon.icon = new_icon_image
             
-            # 更新提示文字为当前状态
-            self.tray_icon.title = f"自动钓鱼 - {self.current_action}"
+            # 更新提示文字为当前状态、收杆次数和装桶次数
+            reels_count = self.stats.get('reels', 0)
+            bucket_count = self.stats.get('bucket_success', 0)
+            self.tray_icon.title = f"自动钓鱼 v{self.VERSION} - {self.current_action} | 收杆: {reels_count} | 装桶: {bucket_count}"
         except Exception as e:
             print(f"更新任务栏图标失败: {e}")
 
@@ -506,9 +561,15 @@ class AutoFishingApp:
             runtime_str = f"{runtime/60:.1f}分钟" if runtime > 60 else f"{runtime:.0f}秒"
             self.stats_labels['runtime'].config(text=runtime_str)
         
-        self.stats_labels['casts'].config(text=str(self.stats['casts']))
-        self.stats_labels['reels'].config(text=str(self.stats['reels']))
-        self.stats_labels['timeouts'].config(text=str(self.stats['timeouts']))
+        # 更新所有统计数据
+        for key in ['casts', 'reels', 'bucket_success', 'timeouts']:
+            if key in self.stats_labels and key in self.stats:
+                self.stats_labels[key].config(text=str(self.stats[key]))
+        
+        # 同时更新任务栏提示信息中的收杆次数
+        if PIL_AVAILABLE and PYSTRAY_AVAILABLE and self.tray_icon:
+            self.update_tray_icon_color()
+            
         self.root.update()
 
     def update_stats_loop(self):
@@ -573,6 +634,7 @@ class AutoFishingApp:
             self.protected = False
 
     def check_fish_pickup(self):
+        """检查鱼是否已被钓起，通过检测日志中的'Fish Pickup attached to rod Toggles(True)'判断"""
         start_time = time.time()
         self.detected_time = None
         
@@ -582,12 +644,14 @@ class AutoFishingApp:
             if "Fish Pickup attached to rod Toggles(True)" in content:
                 if not self.detected_time:
                     self.detected_time = time.time()
+                    print("检测到鱼已上钩")
                     
             if self.detected_time and (time.time() - self.detected_time >= 2):
                 return True
                 
             time.sleep(0.5)
             
+        print("未检测到鱼上钩")
         return False
 
     def perform_reel(self):
@@ -610,13 +674,9 @@ class AutoFishingApp:
         self.detected_time = None
 
     def perform_cast(self):
-        if not self.first_cast:
-            # 只有非首次抛竿才需要休息
-            self.current_action = "休息中"
-            self.update_status()
-            rest_duration = self.get_param(self.rest_time_var, 3.0)
-            time.sleep(max(0.1, rest_duration))
-        else:
+        # 无论是否启用休息时间，都不在这里进行休息逻辑
+        # 休息逻辑已转移到fish_on_hook中处理
+        if self.first_cast:
             self.first_cast = False  # 标记首次抛竿完成
 
         # 蓄力抛竿
@@ -636,7 +696,7 @@ class AutoFishingApp:
         self.start_timeout_timer()
         time.sleep(3)
 
-    def fish_on_hook(self):
+    def fish_on_hook(self, log_content=None):
         if not self.running or self.protected or time.time() - self.last_cycle_end < 2:
             return
 
@@ -644,10 +704,44 @@ class AutoFishingApp:
             self.protected = True
             self.last_cycle_end = time.time()
             self.perform_reel()
+            
+            # 根据是否启用休息时间决定流程
+            if self.rest_enabled.get():
+                # 启用休息时间：直接休息，无需检测鱼装桶
+                self.current_action = "休息中"
+                self.update_status()
+                rest_duration = self.get_param(self.rest_time_var, 0.5)
+                time.sleep(max(0.1, rest_duration))
+            else:
+                # 未启用休息时间：等待鱼装桶后再继续
+                self.current_action = "等待鱼装桶"
+                self.update_status()
+                self.wait_for_fish_bucket()
+            
             self.perform_cast()
         finally:
             self.protected = False
             self.last_cycle_end = time.time()
+            
+    def wait_for_fish_bucket(self):
+        """等待鱼装到桶里，通过检测日志中的"Attempt saving"来判断"""
+        wait_start = time.time()
+        
+        while self.running:
+            time.sleep(0.5)
+            content = self.log_handler.safe_read_file()
+            
+            # 检查是否有鱼装桶信息，只需检测一次
+            if "Attempt saving" in content:
+                print("检测到鱼已装桶")
+                self.stats['bucket_success'] += 1
+                self.update_stats()
+                break
+            
+            # 超过10秒还没有完成装桶，则超时处理（缩短超时时间）
+            if time.time() - wait_start > 10:
+                print("等待鱼装桶超时")
+                break
 
     def on_close(self):
         self.emergency_release()
@@ -661,9 +755,10 @@ class AutoFishingApp:
             if hasattr(self, 'tray_icon') and self.tray_icon:
                 self.tray_icon.stop()
             
-            if self.observer.is_alive():
-                self.observer.stop()
-                self.observer.join(timeout=1)
+            # 修复observer引用错误
+            if hasattr(self.log_handler, 'observer') and self.log_handler.observer.is_alive():
+                self.log_handler.observer.stop()
+                self.log_handler.observer.join(timeout=1)
             
             if hasattr(self.log_handler, 'check_thread'):
                 self.log_handler.check_thread.join(timeout=0.5)
