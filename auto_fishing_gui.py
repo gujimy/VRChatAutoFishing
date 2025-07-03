@@ -175,6 +175,14 @@ class AutoFishingApp:
             threading.Thread(target=self.update_stats_loop, daemon=True).start()
         else:
             self.emergency_release()
+            # 清空统计信息
+            self.stats = {
+                'reels': 0,
+                'timeouts': 0,
+                'bucket_success': 0,
+                'start_time': None
+            }
+            self.update_stats()
 
     def emergency_release(self):
         self.send_click(False)
@@ -234,7 +242,7 @@ class AutoFishingApp:
         title_label.pack(side=LEFT, padx=(0, 10))
         
         # 版本号和更新日期（与标题同行，靠右对齐）
-        update_date = "2025-07-01"
+        update_date = "2025-07-03"
         version_label = Label(title_frame, text=f"v{self.VERSION} ({update_date})", 
                              font=("Arial", 9), fg="gray")
         version_label.pack(side=RIGHT, pady=5)
@@ -345,7 +353,6 @@ class AutoFishingApp:
         # 统计标签
         self.stats_labels = {}
         stats_data = [
-            ("抛竿次数", "casts", "0"),
             ("收杆次数", "reels", "0"),
             ("装桶次数", "bucket_success", "0"),
             ("超时次数", "timeouts", "0"),
@@ -369,7 +376,6 @@ class AutoFishingApp:
         
         # 初始化统计
         self.stats = {
-            'casts': 0,
             'reels': 0,
             'timeouts': 0,
             'bucket_success': 0,  # 成功装桶次数
@@ -555,7 +561,7 @@ class AutoFishingApp:
             self.stats_labels['runtime'].config(text=runtime_str)
         
         # 更新所有统计数据
-        for key in ['casts', 'reels', 'bucket_success', 'timeouts']:
+        for key in ['reels', 'bucket_success', 'timeouts']:
             if key in self.stats_labels and key in self.stats:
                 self.stats_labels[key].config(text=str(self.stats[key]))
         
@@ -686,7 +692,6 @@ class AutoFishingApp:
         self.current_action = "鱼竿蓄力中"
         self.update_status()
         cast_duration = self.get_cast_duration()
-        self.stats['casts'] += 1
         self.update_stats()
         
         self.send_click(True)
