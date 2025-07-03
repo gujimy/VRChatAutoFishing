@@ -129,7 +129,7 @@ class AutoFishingApp:
         self.cast_time_var = DoubleVar(value=0.2)  # 默认0.2秒
         self.rest_time_var = DoubleVar(value=0.5)  # 默认0.5秒
         self.timeout_limit_var = DoubleVar(value=1.0)  # 默认1.0分钟
-        self.rest_enabled = BooleanVar(value=False)  # 是否启用休息时间，默认不启用
+        self.rest_enabled = BooleanVar(value=False)  # 是否关闭装桶检测，默认不关闭（即启用装桶检测）
         
         # 随机蓄力时间相关变量
         self.random_cast_enabled = BooleanVar(value=False)  # 是否启用随机蓄力时间
@@ -257,7 +257,7 @@ class AutoFishingApp:
         # 休息时间设置
         rest_enable_frame = Frame(params_frame)
         rest_enable_frame.pack(fill=X, pady=3)
-        self.rest_enabled_check = Checkbutton(rest_enable_frame, text="启用休息时间(不检测鱼装桶)", 
+        self.rest_enabled_check = Checkbutton(rest_enable_frame, text="关闭装桶检测(直接使用休息时间)", 
                                              variable=self.rest_enabled,
                                              command=self.on_rest_enabled_toggle)
         self.rest_enabled_check.pack(side=LEFT)
@@ -269,9 +269,9 @@ class AutoFishingApp:
         self.rest_scale = Scale(rest_frame, from_=0.1, to=10.0, resolution=0.1,
                                orient=HORIZONTAL, variable=self.rest_time_var,
                                command=self.on_rest_time_change, 
-                               state=DISABLED)
+                               state=NORMAL)
         self.rest_scale.pack(side=LEFT, fill=X, expand=True, padx=(5, 0))
-        self.rest_label = Label(rest_frame, text="0.5秒", width=8, fg="gray")
+        self.rest_label = Label(rest_frame, text="0.5秒", width=8, fg="black")
         self.rest_label.pack(side=RIGHT, padx=(5, 0))
         
         # 超时时间滑块
@@ -405,12 +405,9 @@ class AutoFishingApp:
 
     def on_rest_enabled_toggle(self):
         """休息时间启用/禁用回调"""
-        if self.rest_enabled.get():
-            self.rest_scale.config(state=NORMAL)
-            self.rest_label.config(fg="black")
-        else:
-            self.rest_scale.config(state=DISABLED)
-            self.rest_label.config(fg="gray")
+        # 无论是否启用"关闭装桶检测"，休息时间滑块都应该保持可用状态
+        # 因为两种模式都会使用休息时间
+        pass
 
     def on_random_max_change(self, value):
         """随机最大值改变回调"""
@@ -713,16 +710,22 @@ class AutoFishingApp:
             
             # 根据是否启用休息时间决定流程
             if self.rest_enabled.get():
-                # 启用休息时间：直接休息，无需检测鱼装桶
+                # 启用休息时间（关闭装桶检测）：直接休息，无需检测鱼装桶
                 self.current_action = "休息中"
                 self.update_status()
                 rest_duration = self.get_param(self.rest_time_var, 0.5)
                 time.sleep(max(0.1, rest_duration))
             else:
-                # 未启用休息时间：等待鱼装桶后再继续
+                # 未启用休息时间（启用装桶检测）：等待鱼装桶后再继续
                 self.current_action = "等待鱼装桶"
                 self.update_status()
                 self.wait_for_fish_bucket()
+                
+                # 鱼装桶后也添加休息时间，使用用户设置的休息时间
+                self.current_action = "休息中"
+                self.update_status()
+                rest_duration = self.get_param(self.rest_time_var, 0.5)
+                time.sleep(max(0.1, rest_duration))
             
             self.perform_cast()
         finally:
