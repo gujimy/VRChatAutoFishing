@@ -114,7 +114,7 @@ class VRChatLogHandler(FileSystemEventHandler):
 
 class AutoFishingApp:
     # 定义版本号常量
-    VERSION = "2.1"
+    VERSION = "2.1.1"
     
     def __init__(self, root):
         self.root = root
@@ -492,10 +492,6 @@ class AutoFishingApp:
         # 绘制圆形图标
         draw.ellipse([8, 8, size-8, size-8], fill=color)
         
-        # 添加钓鱼竿图标
-        draw.line([size//2, 8, size//2, size-8], fill="white", width=2)
-        draw.line([size//2, 8, size-16, 16], fill="white", width=2)
-        
         return img
 
     def update_tray_icon_color(self):
@@ -615,7 +611,7 @@ class AutoFishingApp:
         self.timeout_timer.start()
 
     def handle_timeout(self):
-        if self.running and self.current_action == "等待上钩":
+        if self.running and self.current_action == "等待鱼上钩":
             self.current_action = "超时收杆"
             self.update_status()
             self.stats['timeouts'] += 1
@@ -628,7 +624,13 @@ class AutoFishingApp:
 
         try:
             self.protected = True
-            self.perform_reel()
+            self.perform_reel(is_timeout=True)  # 标记为超时收杆
+            
+            # 添加休息时间，确保鱼竿恢复到可抛竿状态
+            self.current_action = "休息中"
+            self.update_status()
+            time.sleep(1.0)  # 休息1.0秒，确保鱼竿恢复状态
+            
             self.perform_cast()
         finally:
             self.protected = False
@@ -654,7 +656,7 @@ class AutoFishingApp:
         print("未检测到鱼上钩")
         return False
 
-    def perform_reel(self):
+    def perform_reel(self, is_timeout=False):
         self.current_action = "收杆中"
         self.update_status()
         self.stats['reels'] += 1
@@ -662,13 +664,17 @@ class AutoFishingApp:
         
         self.send_click(True)
         
-        success = self.check_fish_pickup()
-        
-        if success and self.detected_time:
-            elapsed = time.time() - self.detected_time
-            remaining_time = max(0, 2 - elapsed)
-            if remaining_time > 0:
-                time.sleep(remaining_time)
+        # 如果是超时收杆，不进行长时间等待
+        if is_timeout:
+            time.sleep(10.0)  # 超时情况下等待10秒
+        else:
+            success = self.check_fish_pickup()
+            
+            if success and self.detected_time:
+                elapsed = time.time() - self.detected_time
+                remaining_time = max(0, 2 - elapsed)
+                if remaining_time > 0:
+                    time.sleep(remaining_time)
         
         self.send_click(False)
         self.detected_time = None
