@@ -103,10 +103,10 @@ if exist "auto_fishing_gui.spec" (
     echo Creating new spec file...
     if exist "ico.ico" (
         echo Creating spec file with icon...
-        python -m PyInstaller --onefile --windowed --name "VRChatAutoFishing" --distpath=build --icon=ico.ico auto_fishing_gui.py
+        python -m PyInstaller --onefile --windowed --name "VRChat自动钓鱼" --distpath=build --icon=ico.ico auto_fishing_gui.py
     ) else (
         echo Creating spec file without icon...
-        python -m PyInstaller --onefile --windowed --name "VRChatAutoFishing" --distpath=build auto_fishing_gui.py
+        python -m PyInstaller --onefile --windowed --name "VRChat自动钓鱼" --distpath=build auto_fishing_gui.py
     )
 )
 
@@ -123,20 +123,18 @@ echo.
 
 REM Handle generated executable
 if exist "build\VRChat自动钓鱼\VRChat自动钓鱼.exe" (
-    move "build\VRChat自动钓鱼\VRChat自动钓鱼.exe" "build\VRChat自动钓鱼.exe"
-    echo Executable: build\VRChat自动钓鱼.exe
-    if exist "build\VRChat自动钓鱼" rmdir /s /q "build\VRChat自动钓鱼"
+    echo Moving executable...
+    move "build\VRChat自动钓鱼\VRChat自动钓鱼.exe" "build\VRChat自动钓鱼.exe" > nul
+    echo Cleaning up bundle directory...
+    rmdir /s /q "build\VRChat自动钓鱼"
+    echo Executable is now at: build\VRChat自动钓鱼.exe
 ) else if exist "build\VRChat自动钓鱼.exe" (
-    echo Executable: build\VRChat自动钓鱼.exe
-) else if exist "build\VRChatAutoFishing\VRChatAutoFishing.exe" (
-    move "build\VRChatAutoFishing\VRChatAutoFishing.exe" "build\VRChatAutoFishing.exe"
-    echo Executable: build\VRChatAutoFishing.exe
-    if exist "build\VRChatAutoFishing" rmdir /s /q "build\VRChatAutoFishing"
-) else if exist "build\VRChatAutoFishing.exe" (
-    echo Executable: build\VRChatAutoFishing.exe
+    echo Executable is already at: build\VRChat自动钓鱼.exe
 ) else (
-    echo WARNING: Could not find generated executable
-    echo Checking build directory contents:
+    echo WARNING: Could not find the generated executable 'VRChat自动钓鱼.exe'.
+    echo Please check the 'build' directory manually.
+    echo.
+    echo Contents of 'build' directory:
     dir build
 )
 

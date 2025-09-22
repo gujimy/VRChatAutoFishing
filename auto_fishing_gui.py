@@ -114,7 +114,7 @@ class VRChatLogHandler(FileSystemEventHandler):
 
 class AutoFishingApp:
     # 定义版本号常量
-    VERSION = "2.1.1"
+    VERSION = "2.1.2"
     
     def __init__(self, root):
         self.root = root
@@ -124,9 +124,10 @@ class AutoFishingApp:
         self.last_cycle_end = 0
         self.timeout_timer = None
         self.osc_client = udp_client.SimpleUDPClient("127.0.0.1", 9000)
+        self.stats_lock = threading.Lock()  # 为统计信息添加线程锁
         
         # 参数变量
-        self.cast_time_var = DoubleVar(value=0.2)  # 默认0.2秒
+        self.cast_time_var = DoubleVar(value=0.5)  # 默认0.5秒
         self.rest_time_var = DoubleVar(value=0.5)  # 默认0.5秒
         self.timeout_limit_var = DoubleVar(value=1.0)  # 默认1.0分钟
         self.rest_enabled = BooleanVar(value=False)  # 是否关闭装桶检测，默认不关闭（即启用装桶检测）
@@ -167,7 +168,8 @@ class AutoFishingApp:
         if self.running:
             self.first_cast = True  # 重置首次抛竿标志
             self.current_action = "开始抛竿"
-            self.stats['start_time'] = time.time()  # 记录启动时间
+            with self.stats_lock:
+                self.stats['start_time'] = time.time()  # 记录启动时间
             self.update_status()
             self.update_stats()
             threading.Thread(target=self.perform_cast).start()
@@ -176,12 +178,13 @@ class AutoFishingApp:
         else:
             self.emergency_release()
             # 清空统计信息
-            self.stats = {
-                'reels': 0,
-                'timeouts': 0,
-                'bucket_success': 0,
-                'start_time': None
-            }
+            with self.stats_lock:
+                self.stats = {
+                    'reels': 0,
+                    'timeouts': 0,
+                    'bucket_success': 0,
+                    'start_time': None
+                }
             self.update_stats()
 
     def emergency_release(self):
@@ -242,7 +245,7 @@ class AutoFishingApp:
         title_label.pack(side=LEFT, padx=(0, 10))
         
         # 版本号和更新日期（与标题同行，靠右对齐）
-        update_date = "2025-07-03"
+        update_date = "2025-09-22"
         version_label = Label(title_frame, text=f"v{self.VERSION} ({update_date})", 
                              font=("Arial", 9), fg="gray")
         version_label.pack(side=RIGHT, pady=5)
@@ -259,7 +262,7 @@ class AutoFishingApp:
                                orient=HORIZONTAL, variable=self.cast_time_var,
                                command=self.on_cast_time_change)
         self.cast_scale.pack(side=LEFT, fill=X, expand=True, padx=(5, 0))
-        self.cast_label = Label(cast_frame, text="0.2秒", width=8)
+        self.cast_label = Label(cast_frame, text="0.5秒", width=8)
         self.cast_label.pack(side=RIGHT, padx=(5, 0))
         
         # 休息时间设置
@@ -335,7 +338,7 @@ class AutoFishingApp:
         hotkey_frame = Frame(control_frame)
         hotkey_frame.pack(fill=X, pady=5)
         Label(hotkey_frame, text="快捷键:", font=("Arial", 9)).pack(side=LEFT)
-        hotkey_text = Label(hotkey_frame, text="F4: 显示/隐藏窗口  F5: 开始钓鱼  F6: 停止钓鱼", 
+        hotkey_text = Label(hotkey_frame, text="Ctrl+F4: 显示/隐藏窗口  Ctrl+F5: 开始钓鱼  Ctrl+F6: 停止钓鱼",
                            font=("Arial", 9), fg="gray")
         hotkey_text.pack(side=LEFT, padx=(5, 0))
         
@@ -423,19 +426,27 @@ class AutoFishingApp:
         """设置快捷键"""
         if not PYNPUT_AVAILABLE:
             return
-            
+
+        self.pressed_keys = set()
+
         def on_press(key):
-            try:
-                if key == Key.f4:
+            self.pressed_keys.add(key)
+            # 检测组合键
+            if Key.ctrl_l in self.pressed_keys or Key.ctrl_r in self.pressed_keys:
+                if Key.f4 in self.pressed_keys:
                     self.root.after(0, self.show_window_from_hotkey)
-                elif key == Key.f5:
+                elif Key.f5 in self.pressed_keys:
                     self.root.after(0, self.start_fishing)
-                elif key == Key.f6:
+                elif Key.f6 in self.pressed_keys:
                     self.root.after(0, self.stop_fishing)
-            except AttributeError:
+
+        def on_release(key):
+            try:
+                self.pressed_keys.remove(key)
+            except KeyError:
                 pass
 
-        self.keyboard_listener = keyboard.Listener(on_press=on_press)
+        self.keyboard_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
         self.keyboard_listener.start()
 
     def show_window_from_hotkey(self):
@@ -508,8 +519,9 @@ class AutoFishingApp:
             self.tray_icon.icon = new_icon_image
             
             # 更新提示文字为当前状态、收杆次数和装桶次数
-            reels_count = self.stats.get('reels', 0)
-            bucket_count = self.stats.get('bucket_success', 0)
+            with self.stats_lock:
+                reels_count = self.stats.get('reels', 0)
+                bucket_count = self.stats.get('bucket_success', 0)
             self.tray_icon.title = f"自动钓鱼 v{self.VERSION} - {self.current_action} | 收杆: {reels_count} | 装桶: {bucket_count}"
         except Exception as e:
             print(f"更新任务栏图标失败: {e}")
@@ -555,15 +567,16 @@ class AutoFishingApp:
 
     def update_stats(self):
         """更新统计信息"""
-        if self.stats['start_time']:
-            runtime = time.time() - self.stats['start_time']
-            runtime_str = f"{runtime/60:.1f}分钟" if runtime > 60 else f"{runtime:.0f}秒"
-            self.stats_labels['runtime'].config(text=runtime_str)
-        
-        # 更新所有统计数据
-        for key in ['reels', 'bucket_success', 'timeouts']:
-            if key in self.stats_labels and key in self.stats:
-                self.stats_labels[key].config(text=str(self.stats[key]))
+        with self.stats_lock:
+            if self.stats['start_time']:
+                runtime = time.time() - self.stats['start_time']
+                runtime_str = f"{runtime/60:.1f}分钟" if runtime > 60 else f"{runtime:.0f}秒"
+                self.stats_labels['runtime'].config(text=runtime_str)
+            
+            # 更新所有统计数据
+            for key in ['reels', 'bucket_success', 'timeouts']:
+                if key in self.stats_labels and key in self.stats:
+                    self.stats_labels[key].config(text=str(self.stats[key]))
         
         # 同时更新任务栏提示信息中的收杆次数
         if PIL_AVAILABLE and PYSTRAY_AVAILABLE and self.tray_icon:
@@ -617,7 +630,8 @@ class AutoFishingApp:
         if self.running and self.current_action == "等待鱼上钩":
             self.current_action = "超时收杆"
             self.update_status()
-            self.stats['timeouts'] += 1
+            with self.stats_lock:
+                self.stats['timeouts'] += 1
             self.update_stats()
             self.force_reel()
 
@@ -662,7 +676,8 @@ class AutoFishingApp:
     def perform_reel(self, is_timeout=False):
         self.current_action = "收杆中"
         self.update_status()
-        self.stats['reels'] += 1
+        with self.stats_lock:
+            self.stats['reels'] += 1
         self.update_stats()
         
         self.send_click(True)
@@ -744,13 +759,14 @@ class AutoFishingApp:
         while self.running:
             time.sleep(0.5)
             content = self.log_handler.safe_read_file()
-            
             # 检查是否有鱼装桶信息，只需检测一次
             if "Attempt saving" in content:
                 print("检测到鱼已装桶")
-                self.stats['bucket_success'] += 1
+                with self.stats_lock:
+                    self.stats['bucket_success'] += 1
                 self.update_stats()
                 break
+            
             
             # 超过10秒还没有完成装桶，则超时处理（缩短超时时间）
             if time.time() - wait_start > 10:
