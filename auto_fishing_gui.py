@@ -114,7 +114,7 @@ class VRChatLogHandler(FileSystemEventHandler):
 
 class AutoFishingApp:
     # 定义版本号常量
-    VERSION = "2.1.2"
+    VERSION = "2.1.3"
     
     def __init__(self, root):
         self.root = root
@@ -172,10 +172,15 @@ class AutoFishingApp:
                 self.stats['start_time'] = time.time()  # 记录启动时间
             self.update_status()
             self.update_stats()
-            threading.Thread(target=self.perform_cast).start()
+            threading.Thread(target=self.perform_cast, daemon=True).start()
             # 启动统计更新线程
             threading.Thread(target=self.update_stats_loop, daemon=True).start()
         else:
+            # 取消超时定时器
+            if self.timeout_timer and self.timeout_timer.is_alive():
+                self.timeout_timer.cancel()
+                self.timeout_timer = None
+            
             self.emergency_release()
             # 清空统计信息
             with self.stats_lock:
@@ -245,7 +250,7 @@ class AutoFishingApp:
         title_label.pack(side=LEFT, padx=(0, 10))
         
         # 版本号和更新日期（与标题同行，靠右对齐）
-        update_date = "2025-09-22"
+        update_date = "2025-10-02"
         version_label = Label(title_frame, text=f"v{self.VERSION} ({update_date})", 
                              font=("Arial", 9), fg="gray")
         version_label.pack(side=RIGHT, pady=5)
@@ -338,7 +343,7 @@ class AutoFishingApp:
         hotkey_frame = Frame(control_frame)
         hotkey_frame.pack(fill=X, pady=5)
         Label(hotkey_frame, text="快捷键:", font=("Arial", 9)).pack(side=LEFT)
-        hotkey_text = Label(hotkey_frame, text="Ctrl+F4: 显示/隐藏窗口  Ctrl+F5: 开始钓鱼  Ctrl+F6: 停止钓鱼",
+        hotkey_text = Label(hotkey_frame, text="Ctrl+F4: 显示/隐藏  Ctrl+F5: 开始  Ctrl+F6: 停止  Ctrl+F7: 重钓",
                            font=("Arial", 9), fg="gray")
         hotkey_text.pack(side=LEFT, padx=(5, 0))
         
@@ -409,8 +414,10 @@ class AutoFishingApp:
         """随机蓄力时间选项改变回调"""
         if self.random_cast_enabled.get():
             self.random_max_scale.config(state=NORMAL)
+            self.random_max_label.config(fg="black")
         else:
             self.random_max_scale.config(state=DISABLED)
+            self.random_max_label.config(fg="gray")
 
     def on_rest_enabled_toggle(self):
         """休息时间启用/禁用回调"""
@@ -439,6 +446,8 @@ class AutoFishingApp:
                     self.root.after(0, self.start_fishing)
                 elif Key.f6 in self.pressed_keys:
                     self.root.after(0, self.stop_fishing)
+                elif Key.f7 in self.pressed_keys:
+                    self.root.after(0, self.restart_fishing)
 
         def on_release(key):
             try:
@@ -551,38 +560,53 @@ class AutoFishingApp:
 
     def quit_from_tray(self, icon=None, item=None):
         """从任务栏图标退出程序"""
-        # 显示确认对话框
-        from tkinter import messagebox
-        result = messagebox.askyesno(
-            "确认退出", 
-            "确定要退出自动钓鱼程序吗？\n当前钓鱼状态将会停止。"
-        )
-        if result:
-            self.root.after(0, self.on_close)
+        # 在主线程中显示确认对话框
+        def _show_quit_dialog():
+            from tkinter import messagebox
+            result = messagebox.askyesno(
+                "确认退出",
+                "确定要退出自动钓鱼程序吗？\n当前钓鱼状态将会停止。"
+            )
+            if result:
+                self.on_close()
+        
+        self.root.after(0, _show_quit_dialog)
 
     def update_status(self):
-        self.status_label.config(text=f"[{self.current_action}]")
-        self.update_tray_icon_color()  # 更新任务栏图标颜色
-        self.root.update()
+        """更新状态显示（线程安全）"""
+        def _update():
+            self.status_label.config(text=f"[{self.current_action}]")
+            self.update_tray_icon_color()  # 更新任务栏图标颜色
+        
+        # 如果在主线程中，直接更新；否则使用 after 调度到主线程
+        try:
+            self.root.after(0, _update)
+        except:
+            _update()
 
     def update_stats(self):
-        """更新统计信息"""
-        with self.stats_lock:
-            if self.stats['start_time']:
-                runtime = time.time() - self.stats['start_time']
-                runtime_str = f"{runtime/60:.1f}分钟" if runtime > 60 else f"{runtime:.0f}秒"
-                self.stats_labels['runtime'].config(text=runtime_str)
+        """更新统计信息（线程安全）"""
+        def _update():
+            with self.stats_lock:
+                if self.stats['start_time']:
+                    runtime = time.time() - self.stats['start_time']
+                    runtime_str = f"{runtime/60:.1f}分钟" if runtime > 60 else f"{runtime:.0f}秒"
+                    self.stats_labels['runtime'].config(text=runtime_str)
+                
+                # 更新所有统计数据
+                for key in ['reels', 'bucket_success', 'timeouts']:
+                    if key in self.stats_labels and key in self.stats:
+                        self.stats_labels[key].config(text=str(self.stats[key]))
             
-            # 更新所有统计数据
-            for key in ['reels', 'bucket_success', 'timeouts']:
-                if key in self.stats_labels and key in self.stats:
-                    self.stats_labels[key].config(text=str(self.stats[key]))
+            # 同时更新任务栏提示信息中的收杆次数
+            if PIL_AVAILABLE and PYSTRAY_AVAILABLE and self.tray_icon:
+                self.update_tray_icon_color()
         
-        # 同时更新任务栏提示信息中的收杆次数
-        if PIL_AVAILABLE and PYSTRAY_AVAILABLE and self.tray_icon:
-            self.update_tray_icon_color()
-            
-        self.root.update()
+        # 如果在主线程中，直接更新；否则使用 after 调度到主线程
+        try:
+            self.root.after(0, _update)
+        except:
+            _update()
 
     def update_stats_loop(self):
         """定时更新统计信息"""
@@ -636,19 +660,25 @@ class AutoFishingApp:
             self.force_reel()
 
     def force_reel(self):
-        if self.protected:
+        if self.protected or not self.running:
             return
 
         try:
             self.protected = True
             self.perform_reel(is_timeout=True)  # 标记为超时收杆
             
+            # 检查是否仍在运行
+            if not self.running:
+                return
+            
             # 添加休息时间，确保鱼竿恢复到可抛竿状态
             self.current_action = "休息中"
             self.update_status()
             time.sleep(1.0)  # 休息1.0秒，确保鱼竿恢复状态
             
-            self.perform_cast()
+            # 再次检查是否仍在运行
+            if self.running:
+                self.perform_cast()
         finally:
             self.protected = False
 
@@ -657,7 +687,7 @@ class AutoFishingApp:
         start_time = time.time()
         self.detected_time = None
         
-        while time.time() - start_time < 30:
+        while self.running and time.time() - start_time < 30:
             content = self.log_handler.safe_read_file()
             
             if "Fish Pickup attached to rod Toggles(True)" in content:
@@ -669,6 +699,11 @@ class AutoFishingApp:
                 return True
                 
             time.sleep(0.5)
+        
+        # 如果停止了，返回False
+        if not self.running:
+            print("钓鱼已停止")
+            return False
             
         print("未检测到鱼上钩")
         return False
@@ -698,6 +733,10 @@ class AutoFishingApp:
         self.detected_time = None
 
     def perform_cast(self):
+        # 检查是否仍在运行
+        if not self.running:
+            return
+            
         # 无论是否启用休息时间，都不在这里进行休息逻辑
         # 休息逻辑已转移到fish_on_hook中处理
         if self.first_cast:
@@ -713,6 +752,10 @@ class AutoFishingApp:
         time.sleep(cast_duration)
         self.send_click(False)
 
+        # 检查是否仍在运行
+        if not self.running:
+            return
+
         # 抛竿后等待
         self.current_action = "等待鱼上钩"
         self.update_status()
@@ -727,6 +770,10 @@ class AutoFishingApp:
             self.protected = True
             self.last_cycle_end = time.time()
             self.perform_reel()
+            
+            # 检查是否仍在运行
+            if not self.running:
+                return
             
             # 根据是否启用休息时间决定流程
             if self.rest_enabled.get():
@@ -747,7 +794,9 @@ class AutoFishingApp:
                 rest_duration = self.get_param(self.rest_time_var, 0.5)
                 time.sleep(max(0.1, rest_duration))
             
-            self.perform_cast()
+            # 再次检查是否仍在运行
+            if self.running:
+                self.perform_cast()
         finally:
             self.protected = False
             self.last_cycle_end = time.time()
@@ -766,7 +815,6 @@ class AutoFishingApp:
                     self.stats['bucket_success'] += 1
                 self.update_stats()
                 break
-            
             
             # 超过10秒还没有完成装桶，则超时处理（缩短超时时间）
             if time.time() - wait_start > 10:
@@ -836,6 +884,22 @@ class AutoFishingApp:
         """停止钓鱼"""
         if self.running:
             self.toggle()
+
+    def restart_fishing(self):
+        """一键重钓：先停止钓鱼，再开始钓鱼"""
+        # 在后台线程执行，避免阻塞GUI
+        threading.Thread(target=self._restart_fishing_thread, daemon=True).start()
+    
+    def _restart_fishing_thread(self):
+        """一键重钓的后台线程实现"""
+        # 如果正在运行，先停止
+        if self.running:
+            self.root.after(0, self.toggle)
+            # 等待停止完成，确保所有状态都已重置
+            # 需要等待足够长的时间让 protected 标志释放和 last_cycle_end 检查通过
+            time.sleep(2.5)
+        # 然后开始钓鱼
+        self.root.after(0, self.toggle)
 
 def main():
     """主函数，用于程序入口"""
