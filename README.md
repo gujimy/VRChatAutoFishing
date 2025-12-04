@@ -11,6 +11,10 @@ An automation tool for VRChat fishing worlds, implementing auto-fishing function
 * **世界链接**: [VRChat钓鱼世界](https://vrchat.com/home/world/wrld_ab93c6a0-d158-4e07-88fe-f8f222018faa)
 * **世界ID**: `wrld_ab93c6a0-d158-4e07-88fe-f8f222018faa`
 
+## 软件截图 / Screenshots
+
+![VRChat Auto Fishing 主界面](img/1.png)
+
 ## 功能特性 / Features
 
 ### 核心功能 / Core Features
