@@ -28,16 +28,46 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
 
-    // TODO: 在此处放置代码。
-
     // 初始化全局字符串
     LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
     LoadStringW(hInstance, IDC_AUTOFISHING, szWindowClass, MAX_LOADSTRING);
+    
+    // Check for multiple instances using a named mutex
+    HANDLE hMutex = CreateMutexW(NULL, TRUE, L"VRChat_AutoFishing_SingleInstance_Mutex");
+    if (GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        // Another instance is already running
+        // Find and activate the existing window using the correct window class name
+        HWND hExistingWnd = FindWindowW(szWindowClass, NULL);
+        if (hExistingWnd)
+        {
+            // If window is minimized or hidden in tray, restore it
+            if (IsIconic(hExistingWnd))
+            {
+                ShowWindow(hExistingWnd, SW_RESTORE);
+            }
+            else if (!IsWindowVisible(hExistingWnd))
+            {
+                ShowWindow(hExistingWnd, SW_SHOW);
+            }
+            // Bring window to foreground
+            SetForegroundWindow(hExistingWnd);
+        }
+        if (hMutex)
+        {
+            CloseHandle(hMutex);
+        }
+        return FALSE;
+    }
     MyRegisterClass(hInstance);
 
     // 执行应用程序初始化:
     if (!InitInstance (hInstance, nCmdShow))
     {
+        if (hMutex)
+        {
+            CloseHandle(hMutex);
+        }
         return FALSE;
     }
 
@@ -55,6 +85,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
     }
 
+    // Clean up mutex before exiting
+    if (hMutex)
+    {
+        CloseHandle(hMutex);
+    }
+    
     return (int) msg.wParam;
 }
 
@@ -103,7 +139,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    // 创建固定大小的窗口
    HWND hWnd = CreateWindowW(szWindowClass, L"VRChat 自动钓鱼 v1.0",
       WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-      CW_USEDEFAULT, 0, 520, 560, nullptr, nullptr, hInstance, nullptr);
+      CW_USEDEFAULT, 0, 480, 560, nullptr, nullptr, hInstance, nullptr);
 
    if (!hWnd)
    {

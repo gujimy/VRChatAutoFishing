@@ -224,12 +224,12 @@ std::wstring AutoFishingApp::getStatusDisplayText(const std::string& status) {
 void AutoFishingApp::createControls() {
     int y = 20;
     int labelWidth = 100;
-    int sliderWidth = 300;
-    int valueWidth = 80;
+    int sliderWidth = 280;
+    int valueWidth = 50;
 
     HWND hTitle = CreateWindowW(L"STATIC", getText("title").c_str(),
         WS_CHILD | WS_VISIBLE | SS_CENTER,
-        10, y, 480, 30, hwnd, nullptr, nullptr, nullptr);
+        10, y, 440, 30, hwnd, nullptr, nullptr, nullptr);
     if (hFont) SendMessage(hTitle, WM_SETFONT, (WPARAM)hFont, TRUE);
     y += 40;
 
@@ -254,32 +254,32 @@ void AutoFishingApp::createControls() {
     if (hFont) SendMessage(hRestCheckbox, WM_SETFONT, (WPARAM)hFont, TRUE);
     y += 30;
 
-    HWND hRestTimeLabel = CreateWindowW(L"STATIC", getText("rest_time").c_str(),
-        WS_CHILD | WS_VISIBLE,
+    hRestTimeLabel_title = CreateWindowW(L"STATIC", getText("rest_time").c_str(),
+        WS_CHILD | SW_HIDE, // Initially hidden
         10, y, labelWidth, 20, hwnd, nullptr, nullptr, nullptr);
-    if (hFont) SendMessage(hRestTimeLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    if (hFont) SendMessage(hRestTimeLabel_title, WM_SETFONT, (WPARAM)hFont, TRUE);
     hRestSlider = CreateWindowW(TRACKBAR_CLASSW, nullptr,
-        WS_CHILD | WS_VISIBLE | TBS_AUTOTICKS,
+        WS_CHILD | TBS_AUTOTICKS | SW_HIDE, // Initially hidden
         labelWidth + 10, y, sliderWidth, 30, hwnd, (HMENU)IDC_REST_SLIDER, nullptr, nullptr);
     SendMessage(hRestSlider, TBM_SETRANGE, TRUE, MAKELPARAM(1, 100));
     SendMessage(hRestSlider, TBM_SETPOS, TRUE, 5);
     hRestLabel = CreateWindowW(L"STATIC", L"0.5s",
-        WS_CHILD | WS_VISIBLE | SS_RIGHT,
+        WS_CHILD | SS_RIGHT | SW_HIDE, // Initially hidden
         labelWidth + sliderWidth + 20, y, valueWidth, 20, hwnd, (HMENU)IDC_REST_LABEL, nullptr, nullptr);
     if (hFont) SendMessage(hRestLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
     y += 40;
 
-    HWND hTimeoutTimeLabel = CreateWindowW(L"STATIC", getText("timeout_time").c_str(),
-        WS_CHILD | WS_VISIBLE,
+    hTimeoutTimeLabel_title = CreateWindowW(L"STATIC", getText("timeout_time").c_str(),
+        WS_CHILD | WS_VISIBLE, // Always visible
         10, y, labelWidth, 20, hwnd, nullptr, nullptr, nullptr);
-    if (hFont) SendMessage(hTimeoutTimeLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    if (hFont) SendMessage(hTimeoutTimeLabel_title, WM_SETFONT, (WPARAM)hFont, TRUE);
     hTimeoutSlider = CreateWindowW(TRACKBAR_CLASSW, nullptr,
-        WS_CHILD | WS_VISIBLE | TBS_AUTOTICKS,
+        WS_CHILD | WS_VISIBLE | TBS_AUTOTICKS, // Always visible
         labelWidth + 10, y, sliderWidth, 30, hwnd, (HMENU)IDC_TIMEOUT_SLIDER, nullptr, nullptr);
-    SendMessage(hTimeoutSlider, TBM_SETRANGE, TRUE, MAKELPARAM(5, 150));
+    SendMessage(hTimeoutSlider, TBM_SETRANGE, TRUE, MAKELPARAM(5, 20)); // Max 2.0 minutes
     SendMessage(hTimeoutSlider, TBM_SETPOS, TRUE, 10);
     hTimeoutLabel = CreateWindowW(L"STATIC", L"1.0min",
-        WS_CHILD | WS_VISIBLE | SS_RIGHT,
+        WS_CHILD | WS_VISIBLE | SS_RIGHT, // Always visible
         labelWidth + sliderWidth + 20, y, valueWidth, 20, hwnd, (HMENU)IDC_TIMEOUT_LABEL, nullptr, nullptr);
     if (hFont) SendMessage(hTimeoutLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
     y += 40;
@@ -323,7 +323,7 @@ void AutoFishingApp::createControls() {
 
     HWND hStatsTitle = CreateWindowW(L"STATIC", getText("statistics").c_str(),
         WS_CHILD | WS_VISIBLE | SS_CENTER,
-        10, y, 480, 20, hwnd, nullptr, nullptr, nullptr);
+        10, y, 440, 20, hwnd, nullptr, nullptr, nullptr);
     if (hFont) SendMessage(hStatsTitle, WM_SETFONT, (WPARAM)hFont, TRUE);
     y += 30;
 
@@ -368,7 +368,7 @@ void AutoFishingApp::createControls() {
     // Hotkeys information
     HWND hHotkeysLabel = CreateWindowW(L"STATIC", getText("hotkeys").c_str(),
         WS_CHILD | WS_VISIBLE | SS_CENTER,
-        10, y, 480, 20, hwnd, nullptr, nullptr, nullptr);
+        10, y, 440, 20, hwnd, nullptr, nullptr, nullptr);
     
     // Use main font for hotkeys to make them more readable
     if (hFont) SendMessage(hHotkeysLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -385,6 +385,14 @@ void AutoFishingApp::onCommand(WPARAM wParam, LPARAM lParam) {
     case IDC_REST_CHECKBOX:
         if (event == BN_CLICKED) {
             restEnabled = (SendMessage(hRestCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
+            // When "Disable Bucket Check" is CHECKED (restEnabled=true):
+            // - Show rest time controls
+            // - Timeout controls always visible (no change)
+            int showRest = restEnabled ? SW_SHOW : SW_HIDE;
+
+            ShowWindow(hRestTimeLabel_title, showRest);
+            ShowWindow(hRestSlider, showRest);
+            ShowWindow(hRestLabel, showRest);
         }
         break;
     case IDC_RANDOM_CAST_CHECK:
@@ -723,19 +731,17 @@ void AutoFishingApp::fishOnHook(const std::string& logContent) {
 
     if (!running) return;
 
-    if (restEnabled) {
+    if (restEnabled) { // restEnabled is true when "Disable Bucket Check" is checked
+        // If bucket check is disabled, perform a simple rest.
         currentAction = "Resting";
         updateStatus(currentAction);
         std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(restTime * 1000)));
     }
     else {
+        // If bucket check is enabled, wait for the bucket, which serves as the "rest" period.
         currentAction = "WaitingBucket";
         updateStatus(currentAction);
         waitForFishBucket();
-
-        currentAction = "Resting";
-        updateStatus(currentAction);
-        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(restTime * 1000)));
     }
 
     if (running) {
@@ -858,6 +864,15 @@ void AutoFishingApp::loadConfig() {
         onHScroll(0, (LPARAM)hRestSlider);
         onHScroll(0, (LPARAM)hTimeoutSlider);
         onHScroll(0, (LPARAM)hRandomMaxSlider);
+
+        // Update visibility based on loaded config
+        // Only rest time visibility changes based on restEnabled
+        // Timeout controls are always visible
+        int showRest = restEnabled ? SW_SHOW : SW_HIDE;
+
+        ShowWindow(hRestTimeLabel_title, showRest);
+        ShowWindow(hRestSlider, showRest);
+        ShowWindow(hRestLabel, showRest);
 
     } catch (const json::parse_error& e) {
         (void)e; // Mark as unused to prevent warning

@@ -57,8 +57,10 @@ private:
     HWND hStartButton;
     HWND hCastSlider;
     HWND hCastLabel;
+    HWND hRestTimeLabel_title;
     HWND hRestSlider;
     HWND hRestLabel;
+    HWND hTimeoutTimeLabel_title;
     HWND hTimeoutSlider;
     HWND hTimeoutLabel;
     HWND hStatusLabel;
