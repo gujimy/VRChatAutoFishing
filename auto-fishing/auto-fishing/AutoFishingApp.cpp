@@ -29,7 +29,7 @@ AutoFishingApp::AutoFishingApp(HWND hwnd)
       restTime(FishingConfig::DEFAULT_REST_TIME),
       timeoutLimit(FishingConfig::DEFAULT_TIMEOUT_MINUTES),
       restEnabled(false), randomCastEnabled(false),
-      randomCastMax(1.0), timeoutId(0), hFont(nullptr) {
+      randomCastMax(1.0), noCastMode(false), timeoutId(0), hFont(nullptr) {
     
     // Detect system language
     currentLanguage = detectSystemLanguage();
@@ -157,6 +157,8 @@ std::wstring AutoFishingApp::getText(const std::string& key) {
                          {Language::English, L"Random Cast Time"}}},
         {"random_max", {{Language::Chinese, L"\u968f\u673a\u6700\u5927\u503c:"},
                         {Language::English, L"Random Max:"}}},
+        {"no_cast_mode", {{Language::Chinese, L"\u65e0\u629b\u7aff\u6a21\u5f0f"},
+                          {Language::English, L"No Cast Mode"}}},
         {"start", {{Language::Chinese, L"\u5f00\u59cb"},
                    {Language::English, L"Start"}}},
         {"stop", {{Language::Chinese, L"\u505c\u6b62"},
@@ -233,7 +235,7 @@ void AutoFishingApp::createControls() {
     if (hFont) SendMessage(hTitle, WM_SETFONT, (WPARAM)hFont, TRUE);
     y += 40;
 
-    HWND hCastTimeLabel = CreateWindowW(L"STATIC", getText("cast_time").c_str(),
+    hCastTimeLabel = CreateWindowW(L"STATIC", getText("cast_time").c_str(),
         WS_CHILD | WS_VISIBLE,
         10, y, labelWidth, 20, hwnd, nullptr, nullptr, nullptr);
     if (hFont) SendMessage(hCastTimeLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -288,9 +290,14 @@ void AutoFishingApp::createControls() {
         WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
         10, y, 200, 20, hwnd, (HMENU)IDC_RANDOM_CAST_CHECK, nullptr, nullptr);
     if (hFont) SendMessage(hRandomCastCheck, WM_SETFONT, (WPARAM)hFont, TRUE);
+    
+    hNoCastCheckbox = CreateWindowW(L"BUTTON", getText("no_cast_mode").c_str(),
+        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+        220, y, 200, 20, hwnd, (HMENU)IDC_NO_CAST_CHECKBOX, nullptr, nullptr);
+    if (hFont) SendMessage(hNoCastCheckbox, WM_SETFONT, (WPARAM)hFont, TRUE);
     y += 30;
 
-    HWND hRandomMaxTitleLabel = CreateWindowW(L"STATIC", getText("random_max").c_str(),
+    hRandomMaxTitleLabel = CreateWindowW(L"STATIC", getText("random_max").c_str(),
         WS_CHILD | WS_VISIBLE,
         10, y, labelWidth, 20, hwnd, nullptr, nullptr, nullptr);
     if (hFont) SendMessage(hRandomMaxTitleLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
@@ -399,6 +406,42 @@ void AutoFishingApp::onCommand(WPARAM wParam, LPARAM lParam) {
         if (event == BN_CLICKED) {
             randomCastEnabled = (SendMessage(hRandomCastCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
             EnableWindow(hRandomMaxSlider, randomCastEnabled);
+        }
+        break;
+    case IDC_NO_CAST_CHECKBOX:
+        if (event == BN_CLICKED) {
+            noCastMode = (SendMessage(hNoCastCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
+            
+            // When no cast mode is enabled, ensure bucket check is enabled (restEnabled = false)
+            if (noCastMode) {
+                restEnabled = false;
+                SendMessage(hRestCheckbox, BM_SETCHECK, BST_UNCHECKED, 0);
+            }
+            
+            // Hide/show cast time related controls and bucket check controls
+            int showCast = noCastMode ? SW_HIDE : SW_SHOW;
+            ShowWindow(hCastTimeLabel, showCast);
+            ShowWindow(hCastSlider, showCast);
+            ShowWindow(hCastLabel, showCast);
+            ShowWindow(hRandomCastCheck, showCast);
+            ShowWindow(hRandomMaxTitleLabel, showCast);
+            ShowWindow(hRandomMaxSlider, showCast);
+            ShowWindow(hRandomMaxLabel, showCast);
+            
+            // Also hide bucket check controls when no cast mode is enabled
+            ShowWindow(hRestCheckbox, showCast);
+            // If bucket check is hidden, also hide rest time controls
+            if (noCastMode) {
+                ShowWindow(hRestTimeLabel_title, SW_HIDE);
+                ShowWindow(hRestSlider, SW_HIDE);
+                ShowWindow(hRestLabel, SW_HIDE);
+            } else {
+                // Restore rest time controls visibility based on restEnabled
+                int showRest = restEnabled ? SW_SHOW : SW_HIDE;
+                ShowWindow(hRestTimeLabel_title, showRest);
+                ShowWindow(hRestSlider, showRest);
+                ShowWindow(hRestLabel, showRest);
+            }
         }
         break;
     }
@@ -565,6 +608,16 @@ void AutoFishingApp::performCast() {
         firstCast = false;
     }
 
+    // If no cast mode is enabled, skip the casting action and go directly to waiting for fish
+    if (noCastMode) {
+        currentAction = "WaitingFish";
+        updateStatus(currentAction);
+        startTimeoutTimer();
+        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(FishingConfig::CAST_WAIT_TIME * 1000)));
+        return;
+    }
+
+    // Normal casting mode
     currentAction = "Casting";
     updateStatus(currentAction);
     double duration = getCastDuration();
@@ -847,6 +900,7 @@ void AutoFishingApp::loadConfig() {
         restEnabled = config.value("restEnabled", false);
         randomCastEnabled = config.value("randomCastEnabled", false);
         randomCastMax = config.value("randomCastMax", 1.0);
+        noCastMode = config.value("noCastMode", false);
 
         // Update UI elements
         SendMessage(hCastSlider, TBM_SETPOS, TRUE, static_cast<int>(castTime * 10));
@@ -854,10 +908,29 @@ void AutoFishingApp::loadConfig() {
         SendMessage(hTimeoutSlider, TBM_SETPOS, TRUE, static_cast<int>(timeoutLimit * 10));
         SendMessage(hRandomMaxSlider, TBM_SETPOS, TRUE, static_cast<int>(randomCastMax * 10));
         
+        // If no cast mode is enabled, ensure bucket check is enabled
+        if (noCastMode) {
+            restEnabled = false;
+        }
+        
         SendMessage(hRestCheckbox, BM_SETCHECK, restEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
         SendMessage(hRandomCastCheck, BM_SETCHECK, randomCastEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
+        SendMessage(hNoCastCheckbox, BM_SETCHECK, noCastMode ? BST_CHECKED : BST_UNCHECKED, 0);
         
         EnableWindow(hRandomMaxSlider, randomCastEnabled);
+        
+        // Update visibility based on noCastMode
+        int showCast = noCastMode ? SW_HIDE : SW_SHOW;
+        ShowWindow(hCastTimeLabel, showCast);
+        ShowWindow(hCastSlider, showCast);
+        ShowWindow(hCastLabel, showCast);
+        ShowWindow(hRandomCastCheck, showCast);
+        ShowWindow(hRandomMaxTitleLabel, showCast);
+        ShowWindow(hRandomMaxSlider, showCast);
+        ShowWindow(hRandomMaxLabel, showCast);
+        
+        // Also hide bucket check controls when no cast mode is enabled
+        ShowWindow(hRestCheckbox, showCast);
 
         // Manually trigger update for labels
         onHScroll(0, (LPARAM)hCastSlider);
@@ -866,13 +939,18 @@ void AutoFishingApp::loadConfig() {
         onHScroll(0, (LPARAM)hRandomMaxSlider);
 
         // Update visibility based on loaded config
-        // Only rest time visibility changes based on restEnabled
-        // Timeout controls are always visible
-        int showRest = restEnabled ? SW_SHOW : SW_HIDE;
-
-        ShowWindow(hRestTimeLabel_title, showRest);
-        ShowWindow(hRestSlider, showRest);
-        ShowWindow(hRestLabel, showRest);
+        // If no cast mode is enabled, hide rest time controls
+        // Otherwise, show/hide based on restEnabled
+        if (noCastMode) {
+            ShowWindow(hRestTimeLabel_title, SW_HIDE);
+            ShowWindow(hRestSlider, SW_HIDE);
+            ShowWindow(hRestLabel, SW_HIDE);
+        } else {
+            int showRest = restEnabled ? SW_SHOW : SW_HIDE;
+            ShowWindow(hRestTimeLabel_title, showRest);
+            ShowWindow(hRestSlider, showRest);
+            ShowWindow(hRestLabel, showRest);
+        }
 
     } catch (const json::parse_error& e) {
         (void)e; // Mark as unused to prevent warning
@@ -888,6 +966,7 @@ void AutoFishingApp::saveConfig() {
     config["restEnabled"] = restEnabled;
     config["randomCastEnabled"] = randomCastEnabled;
     config["randomCastMax"] = randomCastMax;
+    config["noCastMode"] = noCastMode;
 
     std::ofstream configFile("config.json");
     if (configFile.is_open()) {

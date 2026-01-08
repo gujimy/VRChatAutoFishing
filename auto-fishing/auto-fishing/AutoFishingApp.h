@@ -38,6 +38,7 @@ enum class Language {
 #define IDC_STATS_BUCKET        1014
 #define IDC_STATS_TIMEOUTS      1015
 #define IDC_STATS_RUNTIME       1016
+#define IDC_NO_CAST_CHECKBOX    1017
 
 // Hotkey IDs
 #define ID_HOTKEY_TOGGLE_WINDOW 2000
@@ -55,6 +56,7 @@ private:
     std::map<std::string, HICON> statusIcons;
     HWND hwnd;
     HWND hStartButton;
+    HWND hCastTimeLabel;
     HWND hCastSlider;
     HWND hCastLabel;
     HWND hRestTimeLabel_title;
@@ -66,8 +68,10 @@ private:
     HWND hStatusLabel;
     HWND hRestCheckbox;
     HWND hRandomCastCheck;
+    HWND hRandomMaxTitleLabel;
     HWND hRandomMaxSlider;
     HWND hRandomMaxLabel;
+    HWND hNoCastCheckbox;
     HWND hStatsReels;
     HWND hStatsBucket;
     HWND hStatsTimeouts;
@@ -103,6 +107,7 @@ private:
     bool restEnabled;
     bool randomCastEnabled;
     double randomCastMax;
+    bool noCastMode;
     std::chrono::steady_clock::time_point detectedTime;
 
     void createControls();

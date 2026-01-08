@@ -20,6 +20,7 @@ An automation tool for VRChat fishing worlds, implementing auto-fishing function
 ### 核心功能 / Core Features
 - 🎣 **自动钓鱼循环** - 自动抛竿、等待鱼上钩、收杆
 - ⏱️ **可调节蓄力时间** - 支持固定和随机蓄力时间
+- 🎯 **无抛竿模式** - 跳过抛竿动作，直接进入等待鱼上钩状态（v2.2.0 新增）
 - 🪣 **智能装桶检测** - 自动检测鱼是否成功装桶（可选关闭）
 - ⏰ **超时保护机制** - 可配置的超时自动收杆
 - 📊 **实时统计信息** - 显示收杆次数、装桶次数、超时次数和运行时间
@@ -113,6 +114,21 @@ msbuild auto-fishing\auto-fishing.sln /p:Configuration=Release /p:Platform=x64
 
 Enable "Random Cast Time" to randomize cast duration between `0.3s` and the set maximum value, making fishing behavior more human-like.
 
+#### 无抛竿模式 / No Cast Mode
+勾选"无抛竿模式"后，程序将跳过抛竿动作，直接进入等待鱼上钩状态。此模式适用于：
+- 已经手动完成抛竿，只需要程序自动等待鱼上钩并收杆
+- 需要精确控制抛竿力度的情况
+- 与其他钓鱼辅助工具配合使用
+
+启用此模式时，蓄力时间相关的设置会自动禁用。
+
+Enable "No Cast Mode" to skip the casting action and go directly to waiting for fish. This mode is suitable for:
+- When you've already cast manually and only need automatic fish detection and reeling
+- When precise cast control is required
+- When using with other fishing assistance tools
+
+When enabled, cast time related settings will be automatically disabled.
+
 #### 关闭装桶检测 / Disable Bucket Check
 如果钓鱼世界不支持装桶或不需要检测装桶，可以勾选此选项跳过装桶等待。
 
@@ -129,7 +145,8 @@ Check this option if the fishing world doesn't support bucket placement or you d
     "timeoutLimit": 1.0,
     "restEnabled": false,
     "randomCastEnabled": false,
-    "randomCastMax": 1.0
+    "randomCastMax": 1.0,
+    "noCastMode": false
 }
 ```
 
@@ -231,6 +248,12 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 - 问题反馈：[Issues](https://github.com/gujimy/VRChatAutoFishing/issues)
 
 ## 更新日志 / Changelog
+
+### v2.2.0 (2026-01-08)
+- 🎯 新增无抛竿模式选项
+- 🔧 启用无抛竿模式时自动禁用蓄力时间相关设置
+- 💾 配置文件支持保存无抛竿模式设置
+- 📝 更新版本号到 2.2.0
 
 ### v1.0.0 (2025-12-04)
 - ✨ 初始版本发布

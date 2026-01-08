@@ -30,5 +30,5 @@ public:
     static constexpr double PICKUP_CHECK_INTERVAL = 0.5;
 
     // Version info
-    static constexpr const char* VERSION = "2.1.3";
+    static constexpr const char* VERSION = "2.2.0";
 };
