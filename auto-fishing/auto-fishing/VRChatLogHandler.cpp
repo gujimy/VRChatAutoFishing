@@ -2,6 +2,7 @@
 #include "FishingConfig.h"
 #include <shlobj.h>
 #include <algorithm>
+#include <sstream>
 
 VRChatLogHandler::VRChatLogHandler(LogCallback callback)
     : callback_(std::move(callback))
@@ -9,6 +10,7 @@ VRChatLogHandler::VRChatLogHandler(LogCallback callback)
     , stopEvent_(NULL)
     , fileChangeEvent_(NULL)
     , logFileHandle_(INVALID_HANDLE_VALUE)
+    , incompleteLineBuffer_()
 {
     filePosition_.QuadPart = 0;
     logDirectory_ = getVRChatLogDir();
@@ -247,6 +249,7 @@ std::string VRChatLogHandler::readNewContent() {
 
     if (filePosition_.QuadPart > fileSize.QuadPart) {
         filePosition_.QuadPart = 0;
+        incompleteLineBuffer_.clear();
         SetFilePointerEx(logFileHandle_, filePosition_, NULL, FILE_BEGIN);
     }
 
@@ -268,23 +271,63 @@ std::string VRChatLogHandler::readNewContent() {
         return "";
     }
 
-    if (bytesRead > 0) {
-        buffer.resize(bytesRead);
-        filePosition_.QuadPart += bytesRead;
-    } else {
-        buffer.clear();
+    if (bytesRead == 0) {
+        return "";
     }
 
-    return buffer;
+    buffer.resize(bytesRead);
+
+    std::string fullContent = incompleteLineBuffer_ + buffer;
+    
+    size_t lastNewline = fullContent.rfind('\n');
+    
+    if (lastNewline == std::string::npos) {
+        incompleteLineBuffer_ = fullContent;
+        filePosition_.QuadPart += bytesRead;
+        return "";
+    }
+
+    std::string completeLines = fullContent.substr(0, lastNewline + 1);
+    incompleteLineBuffer_ = fullContent.substr(lastNewline + 1);
+    
+    filePosition_.QuadPart += bytesRead;
+
+    return completeLines;
+}
+
+void VRChatLogHandler::processLine(const std::string& line) {
+    if (!callback_) {
+        return;
+    }
+
+    try {
+        if (line.find(FISH_HOOK_KEYWORD) != std::string::npos) {
+            callback_(LogEventType::FishOnHook, line);
+        }
+        if (line.find(FISH_PICKUP_KEYWORD) != std::string::npos) {
+            callback_(LogEventType::FishPickup, line);
+        }
+        if (line.find(BUCKET_SAVE_KEYWORD) != std::string::npos) {
+            callback_(LogEventType::BucketSave, line);
+        }
+    } catch (...) {
+    }
 }
 
 void VRChatLogHandler::processLogContent(const std::string& content) {
-    if (content.find(FISH_HOOK_KEYWORD) != std::string::npos) {
-        if (callback_) {
-            try {
-                callback_(content);
-            } catch (...) {
+    if (content.empty()) {
+        return;
+    }
+
+    std::istringstream stream(content);
+    std::string line;
+    
+    while (std::getline(stream, line)) {
+        if (!line.empty()) {
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
             }
+            processLine(line);
         }
     }
 }

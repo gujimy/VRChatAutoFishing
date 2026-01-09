@@ -25,10 +25,16 @@ public:
     static constexpr double CYCLE_COOLDOWN = 2.0;
 
     // Log check intervals
-    static constexpr double LOG_CHECK_INTERVAL = 1.0;
+    static constexpr double LOG_CHECK_INTERVAL = 0.25;
     static constexpr double BUCKET_CHECK_INTERVAL = 0.5;
     static constexpr double PICKUP_CHECK_INTERVAL = 0.5;
 
+    // Reel timeout (seconds)
+    static constexpr double MAX_REEL_TIME = 30.0;
+
+    // Debounce time after cast (seconds)
+    static constexpr double DEBOUNCE_AFTER_CAST = 3.0;
+
     // Version info
-    static constexpr const char* VERSION = "2.2.0";
+    static constexpr const char* VERSION = "2.3.0";
 };

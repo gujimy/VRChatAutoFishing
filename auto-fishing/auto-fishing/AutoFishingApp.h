@@ -85,13 +85,17 @@ private:
     std::atomic<bool> running;
     std::atomic<bool> protected_;
     std::atomic<bool> appIsExiting;
+    std::atomic<bool> reelTimeoutFlag_;
     std::string currentAction;
     std::chrono::steady_clock::time_point lastCycleEnd;
+    std::chrono::steady_clock::time_point lastCastTime_;
     std::thread fishingThread;
     std::thread timeoutThread;
+    std::thread reelTimeoutThread_;
     std::thread statsThread;
     std::mutex statsMutex;
     std::atomic<int> timeoutId;
+    std::atomic<int> reelTimeoutId_;
     bool firstCast;
 
     struct Stats {
@@ -120,11 +124,16 @@ private:
     void performCast();
     void performReel(bool isTimeout = false);
     void forceReel();
-    void fishOnHook(const std::string& logContent);
+    void onLogEvent(LogEventType eventType, const std::string& line);
+    void fishOnHook();
+    void fishPickup();
+    void bucketSave();
     void waitForFishBucket();
     bool checkFishPickup();
     void startTimeoutTimer();
     void handleTimeout();
+    void startReelTimeoutTimer();
+    void handleReelTimeout();
     std::wstring stringToWString(const std::string& str);
     Language detectSystemLanguage();
     std::wstring getStatusDisplayText(const std::string& status);

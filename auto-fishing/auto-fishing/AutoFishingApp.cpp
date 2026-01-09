@@ -24,12 +24,13 @@ struct ProtectedGuard {
 };
 
 AutoFishingApp::AutoFishingApp(HWND hwnd)
-    : hwnd(hwnd), running(false), protected_(false), appIsExiting(false), firstCast(true),
+    : hwnd(hwnd), running(false), protected_(false), appIsExiting(false),
+      reelTimeoutFlag_(false), firstCast(true),
       castTime(FishingConfig::DEFAULT_CAST_TIME),
       restTime(FishingConfig::DEFAULT_REST_TIME),
       timeoutLimit(FishingConfig::DEFAULT_TIMEOUT_MINUTES),
       restEnabled(false), randomCastEnabled(false),
-      randomCastMax(1.0), noCastMode(false), timeoutId(0), hFont(nullptr) {
+      randomCastMax(1.0), noCastMode(false), timeoutId(0), reelTimeoutId_(0), hFont(nullptr) {
     
     // Detect system language
     currentLanguage = detectSystemLanguage();
@@ -62,10 +63,12 @@ AutoFishingApp::AutoFishingApp(HWND hwnd)
         MessageBoxW(hwnd, L"Initialize OSC Client Failed", L"Error", MB_OK | MB_ICONERROR);
     }
 
-    logHandler = new VRChatLogHandler([this](const std::string& content) {
-        this->fishOnHook(content);
+    logHandler = new VRChatLogHandler([this](LogEventType eventType, const std::string& line) {
+        this->onLogEvent(eventType, line);
     });
     logHandler->startMonitor();
+
+    lastCastTime_ = std::chrono::steady_clock::now() - std::chrono::seconds(10);
 
     createControls();
     sendClick(false);
@@ -485,9 +488,9 @@ void AutoFishingApp::toggle() {
     SetWindowTextW(hStartButton, running ? getText("stop").c_str() : getText("start").c_str());
 
     if (running) {
-        // std::cout << "Starting fishing logic..." << std::endl;
         firstCast = true;
         currentAction = "Starting";
+        reelTimeoutFlag_ = false;
         {
             std::lock_guard<std::mutex> lock(statsMutex);
             stats.startTime = std::chrono::steady_clock::now();
@@ -498,8 +501,8 @@ void AutoFishingApp::toggle() {
         fishingThread.detach();
     }
     else {
-        // std::cout << "Stopping fishing logic..." << std::endl;
-        timeoutId++; // Invalidate any running timers
+        timeoutId++;
+        reelTimeoutId_++;
         emergencyRelease();
         {
             std::lock_guard<std::mutex> lock(statsMutex);
@@ -629,6 +632,7 @@ void AutoFishingApp::performCast() {
 
     if (!running) return;
 
+    lastCastTime_ = std::chrono::steady_clock::now();
     currentAction = "WaitingFish";
     updateStatus(currentAction);
     startTimeoutTimer();
@@ -644,13 +648,24 @@ void AutoFishingApp::performReel(bool isTimeout) {
     }
     updateStats();
 
+    reelTimeoutFlag_ = false;
+    startReelTimeoutTimer();
+
     sendClick(true);
 
     if (isTimeout) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(FishingConfig::TIMEOUT_REEL_WAIT * 1000)));
+        auto reelStart = std::chrono::steady_clock::now();
+        while (running && !reelTimeoutFlag_) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - reelStart).count();
+            if (elapsed >= FishingConfig::TIMEOUT_REEL_WAIT) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     } else {
         bool success = checkFishPickup();
-        if (success) {
+        if (success && !reelTimeoutFlag_) {
             auto now = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - detectedTime).count() / 1000.0;
             double remaining = (std::max)(0.0, FishingConfig::FISH_PICKUP_WAIT_TIME - elapsed);
@@ -660,14 +675,33 @@ void AutoFishingApp::performReel(bool isTimeout) {
         }
     }
 
+    reelTimeoutId_++;
     sendClick(false);
+}
+
+void AutoFishingApp::startReelTimeoutTimer() {
+    int currentReelTimeoutId = ++reelTimeoutId_;
+    
+    reelTimeoutThread_ = std::thread([this, currentReelTimeoutId]() {
+        int timeoutMs = static_cast<int>(FishingConfig::MAX_REEL_TIME * 1000);
+        std::this_thread::sleep_for(std::chrono::milliseconds(timeoutMs));
+        
+        if (reelTimeoutId_ == currentReelTimeoutId && running) {
+            handleReelTimeout();
+        }
+    });
+    reelTimeoutThread_.detach();
+}
+
+void AutoFishingApp::handleReelTimeout() {
+    reelTimeoutFlag_ = true;
 }
 
 bool AutoFishingApp::checkFishPickup() {
     auto startTime = std::chrono::steady_clock::now();
     bool detected = false;
 
-    while (running) {
+    while (running && !reelTimeoutFlag_) {
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - startTime).count();
         
@@ -676,12 +710,10 @@ bool AutoFishingApp::checkFishPickup() {
         }
 
         std::string content = logHandler->safeReadFile();
-        // 使用 VRChatLogHandler 中定义的常量
         if (content.find(VRChatLogHandler::FISH_PICKUP_KEYWORD) != std::string::npos) {
             if (!detected) {
                 detectedTime = std::chrono::steady_clock::now();
                 detected = true;
-                // std::cout << "Fish detected on hook" << std::endl;
             }
         }
 
@@ -696,12 +728,10 @@ bool AutoFishingApp::checkFishPickup() {
         std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(FishingConfig::PICKUP_CHECK_INTERVAL * 1000)));
     }
 
-    if (!running) {
-        // std::cout << "Fishing stopped" << std::endl;
+    if (!running || reelTimeoutFlag_) {
         return false;
     }
 
-    // std::cout << "No fish detected" << std::endl;
     return false;
 }
 
@@ -753,46 +783,55 @@ void AutoFishingApp::forceReel() {
     }
 }
 
-void AutoFishingApp::fishOnHook(const std::string& logContent) {
-    // std::cout << "--- fishOnHook triggered ---" << std::endl;
-    
+void AutoFishingApp::onLogEvent(LogEventType eventType, const std::string& line) {
+    switch (eventType) {
+        case LogEventType::FishOnHook:
+            fishOnHook();
+            break;
+        case LogEventType::FishPickup:
+            fishPickup();
+            break;
+        case LogEventType::BucketSave:
+            bucketSave();
+            break;
+    }
+}
+
+void AutoFishingApp::fishOnHook() {
     auto now = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastCycleEnd).count();
     
-    // std::cout << "Checking conditions:" << std::endl;
-    // std::cout << "  - running: " << (running ? "true" : "false") << std::endl;
-    // std::cout << "  - protected_: " << (protected_ ? "true" : "false") << std::endl;
-    // std::cout << "  - elapsed since last cycle: " << elapsed << "s (cooldown is " << FishingConfig::CYCLE_COOLDOWN << "s)" << std::endl;
+    auto elapsedSinceCast = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now - lastCastTime_).count() / 1000.0;
+    if (elapsedSinceCast < FishingConfig::DEBOUNCE_AFTER_CAST) {
+        return;
+    }
+    
+    auto elapsedSinceCycle = std::chrono::duration_cast<std::chrono::seconds>(
+        now - lastCycleEnd).count();
     
     if (!running) {
-        // std::cout << "Blocked: Not running." << std::endl;
         return;
     }
     if (protected_) {
-        // std::cout << "Blocked: Protected flag is set." << std::endl;
         return;
     }
-    if (elapsed < FishingConfig::CYCLE_COOLDOWN) {
-        // std::cout << "Blocked: Cooldown active." << std::endl;
+    if (elapsedSinceCycle < FishingConfig::CYCLE_COOLDOWN) {
         return;
     }
 
     ProtectedGuard guard(protected_);
-    timeoutId++; // Invalidate the current timer
+    timeoutId++;
     lastCycleEnd = std::chrono::steady_clock::now();
-    // std::cout << "Starting performReel..." << std::endl;
     performReel();
 
     if (!running) return;
 
-    if (restEnabled) { // restEnabled is true when "Disable Bucket Check" is checked
-        // If bucket check is disabled, perform a simple rest.
+    if (restEnabled) {
         currentAction = "Resting";
         updateStatus(currentAction);
         std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(restTime * 1000)));
     }
     else {
-        // If bucket check is enabled, wait for the bucket, which serves as the "rest" period.
         currentAction = "WaitingBucket";
         updateStatus(currentAction);
         waitForFishBucket();
@@ -803,6 +842,12 @@ void AutoFishingApp::fishOnHook(const std::string& logContent) {
     }
 
     lastCycleEnd = std::chrono::steady_clock::now();
+}
+
+void AutoFishingApp::fishPickup() {
+}
+
+void AutoFishingApp::bucketSave() {
 }
 
 void AutoFishingApp::waitForFishBucket() {

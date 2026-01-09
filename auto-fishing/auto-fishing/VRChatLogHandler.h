@@ -6,6 +6,12 @@
 #include <atomic>
 #include <mutex>
 
+enum class LogEventType {
+    FishOnHook,
+    FishPickup,
+    BucketSave
+};
+
 class VRChatLogHandler {
 public:
     static constexpr const char* FISH_HOOK_KEYWORD = "SAVED DATA";
@@ -14,7 +20,7 @@ public:
     static constexpr const char* LOG_FILE_PREFIX = "output_log_";
     static constexpr const char* LOG_FILE_EXTENSION = ".txt";
 
-    using LogCallback = std::function<void(const std::string&)>;
+    using LogCallback = std::function<void(LogEventType, const std::string&)>;
 
     explicit VRChatLogHandler(LogCallback callback);
     ~VRChatLogHandler();
@@ -36,11 +42,13 @@ private:
     void fileReadThread();
     std::string readNewContent();
     void processLogContent(const std::string& content);
+    void processLine(const std::string& line);
 
     LogCallback callback_;
     std::wstring logDirectory_;
     std::wstring currentLogPath_;
     LARGE_INTEGER filePosition_;
+    std::string incompleteLineBuffer_;
     
     std::atomic<bool> running_;
     mutable std::mutex mutex_;
