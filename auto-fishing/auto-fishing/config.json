@@ -1,0 +1,9 @@
+{
+    "castTime": 0.5,
+    "noCastMode": false,
+    "randomCastEnabled": false,
+    "randomCastMax": 1.0,
+    "restEnabled": false,
+    "restTime": 0.5,
+    "timeoutLimit": 1.0
+}

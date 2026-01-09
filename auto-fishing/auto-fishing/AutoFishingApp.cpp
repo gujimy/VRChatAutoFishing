@@ -676,7 +676,8 @@ bool AutoFishingApp::checkFishPickup() {
         }
 
         std::string content = logHandler->safeReadFile();
-        if (content.find("Fish Pickup attached to rod Toggles(True)") != std::string::npos) {
+        // 使用 VRChatLogHandler 中定义的常量
+        if (content.find(VRChatLogHandler::FISH_PICKUP_KEYWORD) != std::string::npos) {
             if (!detected) {
                 detectedTime = std::chrono::steady_clock::now();
                 detected = true;
@@ -811,7 +812,8 @@ void AutoFishingApp::waitForFishBucket() {
         std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(FishingConfig::BUCKET_CHECK_INTERVAL * 1000)));
         
         std::string content = logHandler->safeReadFile();
-        if (content.find("Attempt saving") != std::string::npos) {
+        // 使用 VRChatLogHandler 中定义的常量
+        if (content.find(VRChatLogHandler::BUCKET_SAVE_KEYWORD) != std::string::npos) {
             // std::cout << "Fish bucketed" << std::endl;
             {
                 std::lock_guard<std::mutex> lock(statsMutex);

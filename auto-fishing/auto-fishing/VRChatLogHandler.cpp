@@ -1,15 +1,17 @@
 #include "VRChatLogHandler.h"
 #include "FishingConfig.h"
-#include <windows.h>
 #include <shlobj.h>
-#include <iostream>
-#include <filesystem>
 #include <algorithm>
 
-namespace fs = std::filesystem;
-
-VRChatLogHandler::VRChatLogHandler(std::function<void(const std::string&)> cb)
-    : callback(cb), filePosition(0), running(false) {
+VRChatLogHandler::VRChatLogHandler(LogCallback callback)
+    : callback_(std::move(callback))
+    , running_(false)
+    , stopEvent_(NULL)
+    , fileChangeEvent_(NULL)
+    , logFileHandle_(INVALID_HANDLE_VALUE)
+{
+    filePosition_.QuadPart = 0;
+    logDirectory_ = getVRChatLogDir();
     updateLogFile();
 }
 
@@ -17,172 +19,272 @@ VRChatLogHandler::~VRChatLogHandler() {
     stop();
 }
 
-std::string VRChatLogHandler::getVRChatLogDir() {
-    WCHAR appDataPath[MAX_PATH];
-    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appDataPath))) {
-        // Convert wide string to narrow string properly
-        int size = WideCharToMultiByte(CP_UTF8, 0, appDataPath, -1, nullptr, 0, nullptr, nullptr);
-        std::string path(size, 0);
-        WideCharToMultiByte(CP_UTF8, 0, appDataPath, -1, &path[0], size, nullptr, nullptr);
-        // Remove null terminator
-        if (!path.empty() && path.back() == '\0') {
-            path.pop_back();
-        }
-        return path + "\\..\\LocalLow\\VRChat\\VRChat";
-    }
-    return "";
-}
-
-std::string VRChatLogHandler::findLatestLog() {
-    std::string logDir = getVRChatLogDir();
-    if (logDir.empty() || !fs::exists(logDir)) {
-        return "";
-    }
-
-    std::string latestLog;
-    std::filesystem::file_time_type latestTime;
-    bool found = false;
-
-    try {
-        for (const auto& entry : fs::directory_iterator(logDir)) {
-            if (entry.is_regular_file()) {
-                std::string filename = entry.path().filename().string();
-                // 使用 C++17 兼容的方式检查文件扩展名
-                if (filename.find("output_log_") == 0 &&
-                    filename.length() >= 4 &&
-                    filename.substr(filename.length() - 4) == ".txt") {
-                    auto fileTime = fs::last_write_time(entry.path());
-                    if (!found || fileTime > latestTime) {
-                        latestLog = entry.path().string();
-                        latestTime = fileTime;
-                        found = true;
-                    }
-                }
-            }
-        }
-    }
-    catch (const std::exception& e) {
-        std::cerr << "Error finding log file: " << e.what() << std::endl;
-    }
-
-    return latestLog;
-}
-
-bool VRChatLogHandler::updateLogFile() {
-    std::string newLog = findLatestLog();
-    if (newLog != currentLog && !newLog.empty()) {
-        std::lock_guard<std::mutex> lock(logMutex);
-        currentLog = newLog;
-        // Move file position to the end of the file to ignore old logs
-        try {
-            std::ifstream file(currentLog, std::ios::ate);
-            if (file.is_open()) {
-                filePosition = file.tellg();
-            } else {
-                filePosition = 0;
-            }
-        } catch (...) {
-            filePosition = 0;
-        }
-        // std::cout << "Detected new log file, starting from end: " << currentLog << std::endl;
-        return true;
-    }
-    return false;
-}
-
-std::string VRChatLogHandler::safeReadFile() {
-    std::string logPath;
-    std::streampos currentPos;
-
-    {
-        std::lock_guard<std::mutex> lock(logMutex);
-        logPath = currentLog;
-        currentPos = filePosition;
-    }
-
-    if (logPath.empty() || !fs::exists(logPath)) {
-        return "";
-    }
-
-    try {
-        std::ifstream file(logPath, std::ios::binary | std::ios::ate);
-        if (!file.is_open()) {
-            return "";
-        }
-
-        std::streampos fileSize = file.tellg();
-        if (currentPos > fileSize) {
-            // Log file has shrunk or changed, reset.
-            currentPos = 0;
-        }
-
-        if (currentPos >= fileSize) {
-            return ""; // No new content
-        }
-
-        file.seekg(currentPos);
-        
-        std::string content;
-        content.resize(fileSize - currentPos);
-        file.read(&content[0], content.size());
-        
-        {
-            std::lock_guard<std::mutex> lock(logMutex);
-            filePosition = fileSize;
-        }
-
-        return content;
-    }
-    catch (const std::exception& e) {
-        std::cerr << "Failed to read log file: " << e.what() << std::endl;
-    }
-    return "";
-}
-
-void VRChatLogHandler::checkLogsThread() {
-    // std::cout << "Log monitoring thread started" << std::endl;
-    
-    while (running) {
-        std::this_thread::sleep_for(
-            std::chrono::milliseconds(static_cast<int>(FishingConfig::LOG_CHECK_INTERVAL * 1000))
-        );
-
-        if (updateLogFile()) {
-            continue;
-        }
-
-        std::string content = safeReadFile();
-        if (!content.empty()) {
-            // std::cout << "Read log content: " << content.substr(0, (std::min)(100, (int)content.length())) << "..." << std::endl;
-        }
-        
-        if (content.find("SAVED DATA") != std::string::npos) {
-            // std::cout << "!!! Found SAVED DATA in log, triggering callback !!!" << std::endl;
-            if (callback) {
-                callback(content);
-            }
-        }
-    }
-    
-    // std::cout << "Log monitoring thread stopped" << std::endl;
-}
-
 void VRChatLogHandler::startMonitor() {
-    if (!running) {
-        running = true;
-        monitorThread = std::thread(&VRChatLogHandler::checkLogsThread, this);
+    bool expected = false;
+    if (!running_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        return;
     }
+
+    stopEvent_ = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (!stopEvent_) {
+        running_ = false;
+        return;
+    }
+
+    if (!logDirectory_.empty()) {
+        fileChangeEvent_ = FindFirstChangeNotificationW(
+            logDirectory_.c_str(),
+            FALSE,
+            FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SIZE
+        );
+    }
+
+    watchThread_ = std::thread(&VRChatLogHandler::directoryWatchThread, this);
+    readThread_ = std::thread(&VRChatLogHandler::fileReadThread, this);
 }
 
 void VRChatLogHandler::stop() {
-    if (running) {
-        running = false;
-        if (monitorThread.joinable()) {
-            monitorThread.join();
+    bool expected = true;
+    if (!running_.compare_exchange_strong(expected, false, std::memory_order_acq_rel)) {
+        return;
+    }
+
+    if (stopEvent_) {
+        SetEvent(stopEvent_);
+    }
+
+    if (watchThread_.joinable()) {
+        watchThread_.join();
+    }
+    if (readThread_.joinable()) {
+        readThread_.join();
+    }
+
+    if (fileChangeEvent_ && fileChangeEvent_ != INVALID_HANDLE_VALUE) {
+        FindCloseChangeNotification(fileChangeEvent_);
+        fileChangeEvent_ = NULL;
+    }
+
+    if (logFileHandle_ != INVALID_HANDLE_VALUE) {
+        CloseHandle(logFileHandle_);
+        logFileHandle_ = INVALID_HANDLE_VALUE;
+    }
+
+    if (stopEvent_) {
+        CloseHandle(stopEvent_);
+        stopEvent_ = NULL;
+    }
+}
+
+std::string VRChatLogHandler::safeReadFile() {
+    return readNewContent();
+}
+
+std::string VRChatLogHandler::getCurrentLogPath() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (currentLogPath_.empty()) {
+        return "";
+    }
+    int size = WideCharToMultiByte(CP_UTF8, 0, currentLogPath_.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 0) return "";
+    std::string result(size - 1, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, currentLogPath_.c_str(), -1, result.data(), size, nullptr, nullptr);
+    return result;
+}
+
+std::wstring VRChatLogHandler::getVRChatLogDir() const {
+    PWSTR localLowPath = nullptr;
+    HRESULT hr = SHGetKnownFolderPath(FOLDERID_LocalAppDataLow, 0, nullptr, &localLowPath);
+    
+    if (SUCCEEDED(hr) && localLowPath) {
+        std::wstring path(localLowPath);
+        CoTaskMemFree(localLowPath);
+        return path + L"\\VRChat\\VRChat";
+    }
+    
+    WCHAR appDataPath[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appDataPath))) {
+        return std::wstring(appDataPath) + L"\\..\\LocalLow\\VRChat\\VRChat";
+    }
+    
+    return L"";
+}
+
+std::wstring VRChatLogHandler::findLatestLog() const {
+    if (logDirectory_.empty()) {
+        return L"";
+    }
+
+    WIN32_FIND_DATAW findData;
+    std::wstring searchPath = logDirectory_ + L"\\output_log_*.txt";
+    
+    HANDLE hFind = FindFirstFileW(searchPath.c_str(), &findData);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        return L"";
+    }
+
+    std::wstring latestFile;
+    FILETIME latestTime = {0, 0};
+
+    do {
+        if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            if (CompareFileTime(&findData.ftLastWriteTime, &latestTime) > 0) {
+                latestTime = findData.ftLastWriteTime;
+                latestFile = findData.cFileName;
+            }
+        }
+    } while (FindNextFileW(hFind, &findData));
+
+    FindClose(hFind);
+
+    if (latestFile.empty()) {
+        return L"";
+    }
+
+    return logDirectory_ + L"\\" + latestFile;
+}
+
+bool VRChatLogHandler::updateLogFile() {
+    std::wstring newLog = findLatestLog();
+    
+    if (newLog.empty()) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    
+    if (newLog == currentLogPath_) {
+        return false;
+    }
+
+    if (logFileHandle_ != INVALID_HANDLE_VALUE) {
+        CloseHandle(logFileHandle_);
+        logFileHandle_ = INVALID_HANDLE_VALUE;
+    }
+
+    currentLogPath_ = newLog;
+
+    logFileHandle_ = CreateFileW(
+        currentLogPath_.c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+
+    if (logFileHandle_ != INVALID_HANDLE_VALUE) {
+        LARGE_INTEGER fileSize;
+        if (GetFileSizeEx(logFileHandle_, &fileSize)) {
+            filePosition_ = fileSize;
+            SetFilePointerEx(logFileHandle_, filePosition_, NULL, FILE_BEGIN);
+        }
+    } else {
+        filePosition_.QuadPart = 0;
+    }
+
+    return true;
+}
+
+void VRChatLogHandler::directoryWatchThread() {
+    HANDLE handles[2] = { stopEvent_, fileChangeEvent_ };
+    int handleCount = fileChangeEvent_ ? 2 : 1;
+
+    while (running_.load(std::memory_order_acquire)) {
+        DWORD waitResult = WaitForMultipleObjects(
+            handleCount,
+            handles,
+            FALSE,
+            static_cast<DWORD>(FishingConfig::LOG_CHECK_INTERVAL * 1000)
+        );
+
+        if (!running_.load(std::memory_order_acquire)) {
+            break;
+        }
+
+        if (waitResult == WAIT_OBJECT_0) {
+            break;
+        }
+
+        updateLogFile();
+
+        if (waitResult == WAIT_OBJECT_0 + 1 && fileChangeEvent_) {
+            FindNextChangeNotification(fileChangeEvent_);
         }
     }
 }
 
-std::string VRChatLogHandler::getCurrentLogPath() const {
-    return currentLog;
+void VRChatLogHandler::fileReadThread() {
+    while (running_.load(std::memory_order_acquire)) {
+        DWORD waitResult = WaitForSingleObject(
+            stopEvent_,
+            static_cast<DWORD>(FishingConfig::LOG_CHECK_INTERVAL * 1000)
+        );
+
+        if (!running_.load(std::memory_order_acquire) || waitResult == WAIT_OBJECT_0) {
+            break;
+        }
+
+        std::string content = readNewContent();
+        if (!content.empty()) {
+            processLogContent(content);
+        }
+    }
+}
+
+std::string VRChatLogHandler::readNewContent() {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (logFileHandle_ == INVALID_HANDLE_VALUE) {
+        return "";
+    }
+
+    LARGE_INTEGER fileSize;
+    if (!GetFileSizeEx(logFileHandle_, &fileSize)) {
+        return "";
+    }
+
+    if (filePosition_.QuadPart > fileSize.QuadPart) {
+        filePosition_.QuadPart = 0;
+        SetFilePointerEx(logFileHandle_, filePosition_, NULL, FILE_BEGIN);
+    }
+
+    if (filePosition_.QuadPart >= fileSize.QuadPart) {
+        return "";
+    }
+
+    LONGLONG bytesToRead = fileSize.QuadPart - filePosition_.QuadPart;
+    if (bytesToRead <= 0 || bytesToRead > 10 * 1024 * 1024) {
+        return "";
+    }
+
+    std::string buffer(static_cast<size_t>(bytesToRead), '\0');
+    DWORD bytesRead = 0;
+
+    SetFilePointerEx(logFileHandle_, filePosition_, NULL, FILE_BEGIN);
+    
+    if (!ReadFile(logFileHandle_, buffer.data(), static_cast<DWORD>(bytesToRead), &bytesRead, NULL)) {
+        return "";
+    }
+
+    if (bytesRead > 0) {
+        buffer.resize(bytesRead);
+        filePosition_.QuadPart += bytesRead;
+    } else {
+        buffer.clear();
+    }
+
+    return buffer;
+}
+
+void VRChatLogHandler::processLogContent(const std::string& content) {
+    if (content.find(FISH_HOOK_KEYWORD) != std::string::npos) {
+        if (callback_) {
+            try {
+                callback_(content);
+            } catch (...) {
+            }
+        }
+    }
 }
