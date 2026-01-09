@@ -35,6 +35,5 @@ public:
     // Debounce time after cast (seconds)
     static constexpr double DEBOUNCE_AFTER_CAST = 3.0;
 
-    // Version info
-    static constexpr const char* VERSION = "2.3.0";
+    static constexpr const char* VERSION = "1.1";
 };

@@ -146,8 +146,8 @@ Language AutoFishingApp::detectSystemLanguage() {
 
 std::wstring AutoFishingApp::getText(const std::string& key) {
     static const std::map<std::string, std::map<Language, std::wstring>> textMap = {
-        {"title", {{Language::Chinese, L"VRChat \u81ea\u52a8\u9493\u9c7c v1.0"},
-                   {Language::English, L"VRChat Auto Fishing v1.0"}}},
+        {"title", {{Language::Chinese, L"VRChat \u81ea\u52a8\u9493\u9c7c v1.1"},
+                   {Language::English, L"VRChat Auto Fishing v1.1"}}},
         {"cast_time", {{Language::Chinese, L"\u84c4\u529b\u65f6\u95f4:"},
                        {Language::English, L"Cast Time:"}}},
         {"rest_time", {{Language::Chinese, L"\u4f11\u606f\u65f6\u95f4:"},
@@ -178,8 +178,8 @@ std::wstring AutoFishingApp::getText(const std::string& key) {
                       {Language::English, L"Timeouts:"}}},
         {"runtime", {{Language::Chinese, L"\u8fd0\u884c\u65f6\u95f4:"},
                      {Language::English, L"Runtime:"}}},
-        {"tray_tooltip", {{Language::Chinese, L"VRChat \u81ea\u52a8\u9493\u9c7c v1.0"},
-                          {Language::English, L"VRChat Auto Fishing v1.0"}}},
+        {"tray_tooltip", {{Language::Chinese, L"VRChat \u81ea\u52a8\u9493\u9c7c v1.1"},
+                          {Language::English, L"VRChat Auto Fishing v1.1"}}},
         {"hotkeys", {{Language::Chinese, L"\u5feb\u6377\u952e: Ctrl+F4: \u663e\u793a/\u9690\u85cf  Ctrl+F5: \u5f00\u59cb  Ctrl+F6: \u505c\u6b62  Ctrl+F7: \u91cd\u9493"},
                      {Language::English, L"Hotkeys: Ctrl+F4: Show/Hide  Ctrl+F5: Start  Ctrl+F6: Stop  Ctrl+F7: Restart"}}}
     };
@@ -857,7 +857,6 @@ void AutoFishingApp::waitForFishBucket() {
         std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(FishingConfig::BUCKET_CHECK_INTERVAL * 1000)));
         
         std::string content = logHandler->safeReadFile();
-        // 使用 VRChatLogHandler 中定义的常量
         if (content.find(VRChatLogHandler::BUCKET_SAVE_KEYWORD) != std::string::npos) {
             // std::cout << "Fish bucketed" << std::endl;
             {
