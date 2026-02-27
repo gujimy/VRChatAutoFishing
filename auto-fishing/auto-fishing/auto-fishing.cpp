@@ -113,8 +113,11 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
    hInst = hInstance;
+   std::string version = FishingConfig::VERSION;
+   std::wstring wVersion(version.begin(), version.end());
+   std::wstring windowTitle = L"VRChat Auto Fishing v" + wVersion;
 
-   HWND hWnd = CreateWindowW(szWindowClass, L"VRChat Auto Fishing v1.1",
+   HWND hWnd = CreateWindowW(szWindowClass, windowTitle.c_str(),
       WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
       CW_USEDEFAULT, 0, 480, 560, nullptr, nullptr, hInstance, nullptr);
 

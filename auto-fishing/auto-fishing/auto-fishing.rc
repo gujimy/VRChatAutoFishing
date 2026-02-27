@@ -28,7 +28,7 @@ CAPTION      "About VRChat Auto Fishing"
 FONT      9,      "MS Shell Dlg"
 BEGIN
         ICON                        IDI_AUTOFISHING,  IDC_STATIC,  14,  14,  21,  20
-        LTEXT                      "VRChat Auto Fishing v1.1",  IDC_STATIC,  42,  14,  170,  8,  SS_NOPREFIX
+        LTEXT                      "VRChat Auto Fishing",  IDC_STATIC,  42,  14,  170,  8,  SS_NOPREFIX
         LTEXT                      "Author: laomo(gujimy)",  IDC_STATIC,  42,  28,  170,  8
         LTEXT                      "GitHub: https://github.com/gujimy",  IDC_STATIC,  42,  42,  170,  8
         LTEXT                      "Copyright (C) 2025",  IDC_STATIC,  42,  56,  170,  8

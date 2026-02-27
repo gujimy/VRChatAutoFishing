@@ -21,7 +21,7 @@ An automation tool for VRChat fishing worlds, implementing auto-fishing function
 - 🎣 **自动钓鱼循环** - 自动抛竿、等待鱼上钩、收杆
 - ⏱️ **可调节蓄力时间** - 支持固定和随机蓄力时间
 - 🎯 **无抛竿模式** - 跳过抛竿动作，直接进入等待鱼上钩状态（v2.2.0 新增）
-- 🪣 **智能装桶检测** - 自动检测鱼是否成功装桶（可选关闭）
+- 🪣 **智能装桶检测** - 自动检测鱼是否成功装桶（异步延迟追踪）
 - ⏰ **超时保护机制** - 可配置的超时自动收杆
 - 📊 **实时统计信息** - 显示收杆次数、装桶次数、超时次数和运行时间
 
@@ -129,11 +129,6 @@ Enable "No Cast Mode" to skip the casting action and go directly to waiting for 
 
 When enabled, cast time related settings will be automatically disabled.
 
-#### 关闭装桶检测 / Disable Bucket Check
-如果钓鱼世界不支持装桶或不需要检测装桶，可以勾选此选项跳过装桶等待。
-
-Check this option if the fishing world doesn't support bucket placement or you don't need to wait for it.
-
 ## 配置文件 / Configuration File
 
 程序会在运行目录自动生成 `config.json` 保存所有设置：
@@ -143,7 +138,6 @@ Check this option if the fishing world doesn't support bucket placement or you d
     "castTime": 0.5,
     "restTime": 0.5,
     "timeoutLimit": 1.0,
-    "restEnabled": false,
     "randomCastEnabled": false,
     "randomCastMax": 1.0,
     "noCastMode": false
@@ -193,12 +187,12 @@ Log handler monitoring VRChat log files and triggering events.
 
 ### 状态机 / State Machine
 
-程序使用状态机管理钓鱼流程：
+程序使用状态机管理钓鱼流程（装桶检测改为异步追踪，不阻塞下一次抛竿）：
 
 ```
-等待 → 开始抛竿 → 蓄力中 → 等待鱼上钩 → 收杆中 → 等待装桶 → 休息 → 开始抛竿
-                                    ↓
-                               超时收杆 → 休息 → 开始抛竿
+等待 → 开始抛竿 → 蓄力中 → 等待鱼上钩 → 收杆中 → 休息 → 开始抛竿
+                          ↓
+                     超时收杆 → 休息 → 开始抛竿
 ```
 
 ## 常见问题 / FAQ
@@ -249,7 +243,12 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 
 ## 更新日志 / Changelog
 
-### v2.2.0 (2026-01-08)
+### v1.2.0 (2026-02-27)
+- 🧹 移除“关闭装桶检测”模式（UI/配置/逻辑）
+- 🪣 装桶统计改为异步延迟追踪，避免阻塞下一次抛竿
+- 🎯 保留并兼容“无抛竿模式”
+
+### v1.1.0 (2026-01-08)
 - 🎯 新增无抛竿模式选项
 - 🔧 启用无抛竿模式时自动禁用蓄力时间相关设置
 - 💾 配置文件支持保存无抛竿模式设置

@@ -11,6 +11,7 @@
 #include <thread>
 #include <chrono>
 #include <map>
+#include <optional>
 #include "nlohmann/json.hpp"
 
 // Language enum
@@ -30,7 +31,6 @@ enum class Language {
 #define IDC_TIMEOUT_SLIDER      1006
 #define IDC_TIMEOUT_LABEL       1007
 #define IDC_STATUS_LABEL        1008
-#define IDC_REST_CHECKBOX       1009
 #define IDC_RANDOM_CAST_CHECK   1010
 #define IDC_RANDOM_MAX_SLIDER   1011
 #define IDC_RANDOM_MAX_LABEL    1012
@@ -39,6 +39,7 @@ enum class Language {
 #define IDC_STATS_TIMEOUTS      1015
 #define IDC_STATS_RUNTIME       1016
 #define IDC_NO_CAST_CHECKBOX    1017
+#define IDC_STATUS_CAST_RUNTIME 1018
 
 // Hotkey IDs
 #define ID_HOTKEY_TOGGLE_WINDOW 2000
@@ -66,7 +67,7 @@ private:
     HWND hTimeoutSlider;
     HWND hTimeoutLabel;
     HWND hStatusLabel;
-    HWND hRestCheckbox;
+    HWND hStatusCastRuntime;
     HWND hRandomCastCheck;
     HWND hRandomMaxTitleLabel;
     HWND hRandomMaxSlider;
@@ -97,6 +98,18 @@ private:
     std::atomic<int> timeoutId;
     std::atomic<int> reelTimeoutId_;
     bool firstCast;
+    int castCycleId_;
+    int pendingBucketCycleId_;
+    int pendingBucketRetry_;
+    std::chrono::steady_clock::time_point waitHookStartedAt_;
+    std::chrono::steady_clock::time_point currentCycleStartedAt_;
+    std::chrono::steady_clock::time_point pendingBucketStartedAt_;
+    std::chrono::system_clock::time_point waitHookStartedWallAt_;
+    std::chrono::system_clock::time_point pendingBucketMinEventAt_;
+    std::chrono::system_clock::time_point lastBucketSavedAt_;
+    std::chrono::system_clock::time_point lastHookSavedEventAt_;
+    std::atomic<bool> fishPickupDetected_;
+    std::chrono::steady_clock::time_point fishPickupDetectedAt_;
 
     struct Stats {
         int reels;
@@ -108,7 +121,6 @@ private:
     double castTime;
     double restTime;
     double timeoutLimit;
-    bool restEnabled;
     bool randomCastEnabled;
     double randomCastMax;
     bool noCastMode;
@@ -122,14 +134,18 @@ private:
     void sendClick(bool press);
     double getCastDuration();
     void performCast();
-    void performReel(bool isTimeout = false);
+    bool performReel(bool isTimeout = false);
     void forceReel();
     void onLogEvent(LogEventType eventType, const std::string& line);
-    void fishOnHook();
-    void fishPickup();
+    void fishOnHook(const std::string& line);
+    void fishPickup(const std::string& line);
     void bucketSave();
-    void waitForFishBucket();
     bool checkFishPickup();
+    bool tryConsumeDeferredBucket(const std::string& line);
+    void startDeferredBucketTracking(int cycleId, const std::optional<std::chrono::system_clock::time_point>& minEventAt);
+    void clearDeferredBucketTracking();
+    void maybeRecoverMissingBucket();
+    std::optional<std::chrono::system_clock::time_point> extractLogTimestamp(const std::string& line) const;
     void startTimeoutTimer();
     void handleTimeout();
     void startReelTimeoutTimer();

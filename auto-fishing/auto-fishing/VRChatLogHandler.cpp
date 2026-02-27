@@ -82,6 +82,52 @@ std::string VRChatLogHandler::safeReadFile() {
     return readNewContent();
 }
 
+std::string VRChatLogHandler::readTail(size_t maxBytes) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (currentLogPath_.empty()) {
+        return "";
+    }
+
+    HANDLE tailHandle = CreateFileW(
+        currentLogPath_.c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+    if (tailHandle == INVALID_HANDLE_VALUE) {
+        return "";
+    }
+
+    LARGE_INTEGER fileSize{};
+    if (!GetFileSizeEx(tailHandle, &fileSize) || fileSize.QuadPart <= 0) {
+        CloseHandle(tailHandle);
+        return "";
+    }
+
+    LONGLONG bytesToRead = static_cast<LONGLONG>(maxBytes);
+    if (bytesToRead > fileSize.QuadPart) {
+        bytesToRead = fileSize.QuadPart;
+    }
+    LARGE_INTEGER startPos{};
+    startPos.QuadPart = fileSize.QuadPart - bytesToRead;
+    SetFilePointerEx(tailHandle, startPos, NULL, FILE_BEGIN);
+
+    std::string buffer(static_cast<size_t>(bytesToRead), '\0');
+    DWORD bytesRead = 0;
+    if (!ReadFile(tailHandle, buffer.data(), static_cast<DWORD>(bytesToRead), &bytesRead, NULL) || bytesRead == 0) {
+        CloseHandle(tailHandle);
+        return "";
+    }
+
+    buffer.resize(bytesRead);
+    CloseHandle(tailHandle);
+    return buffer;
+}
+
 std::string VRChatLogHandler::getCurrentLogPath() const {
     std::lock_guard<std::mutex> lock(mutex_);
     if (currentLogPath_.empty()) {

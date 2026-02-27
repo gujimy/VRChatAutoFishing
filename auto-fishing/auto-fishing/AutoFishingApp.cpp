@@ -6,6 +6,8 @@
 #include <iomanip>
 #include <iostream>
 #include <fstream>
+#include <regex>
+#include <ctime>
 #include "nlohmann/json.hpp"
 
 using json = nlohmann::json;
@@ -29,8 +31,10 @@ AutoFishingApp::AutoFishingApp(HWND hwnd)
       castTime(FishingConfig::DEFAULT_CAST_TIME),
       restTime(FishingConfig::DEFAULT_REST_TIME),
       timeoutLimit(FishingConfig::DEFAULT_TIMEOUT_MINUTES),
-      restEnabled(false), randomCastEnabled(false),
-      randomCastMax(1.0), noCastMode(false), timeoutId(0), reelTimeoutId_(0), hFont(nullptr) {
+      randomCastEnabled(false), randomCastMax(1.0), noCastMode(false),
+      timeoutId(0), reelTimeoutId_(0), castCycleId_(0),
+      pendingBucketCycleId_(0), pendingBucketRetry_(0),
+      fishPickupDetected_(false), hFont(nullptr) {
     
     // Detect system language
     currentLanguage = detectSystemLanguage();
@@ -38,7 +42,17 @@ AutoFishingApp::AutoFishingApp(HWND hwnd)
     stats.reels = 0;
     stats.timeouts = 0;
     stats.bucketSuccess = 0;
-    lastCycleEnd = std::chrono::steady_clock::now();
+    auto nowSteady = std::chrono::steady_clock::now();
+    auto nowWall = std::chrono::system_clock::now();
+    lastCycleEnd = nowSteady;
+    waitHookStartedAt_ = nowSteady;
+    currentCycleStartedAt_ = nowSteady;
+    pendingBucketStartedAt_ = nowSteady;
+    waitHookStartedWallAt_ = nowWall;
+    pendingBucketMinEventAt_ = nowWall;
+    lastBucketSavedAt_ = nowWall - std::chrono::seconds(60);
+    lastHookSavedEventAt_ = nowWall - std::chrono::seconds(60);
+    fishPickupDetectedAt_ = nowSteady;
     
     // Create a better font for Chinese text display
     hFont = CreateFontW(
@@ -145,17 +159,34 @@ Language AutoFishingApp::detectSystemLanguage() {
 }
 
 std::wstring AutoFishingApp::getText(const std::string& key) {
+    auto versionToWString = []() -> std::wstring {
+        std::string ver = FishingConfig::VERSION;
+        return std::wstring(ver.begin(), ver.end());
+    };
+
+    if (key == "title") {
+        const std::wstring version = versionToWString();
+        if (currentLanguage == Language::Chinese) {
+            return L"VRChat \u81ea\u52a8\u9493\u9c7c v" + version;
+        }
+        return L"VRChat Auto Fishing v" + version;
+    }
+
+    if (key == "tray_tooltip") {
+        const std::wstring version = versionToWString();
+        if (currentLanguage == Language::Chinese) {
+            return L"VRChat \u81ea\u52a8\u9493\u9c7c v" + version;
+        }
+        return L"VRChat Auto Fishing v" + version;
+    }
+
     static const std::map<std::string, std::map<Language, std::wstring>> textMap = {
-        {"title", {{Language::Chinese, L"VRChat \u81ea\u52a8\u9493\u9c7c v1.1"},
-                   {Language::English, L"VRChat Auto Fishing v1.1"}}},
         {"cast_time", {{Language::Chinese, L"\u84c4\u529b\u65f6\u95f4:"},
                        {Language::English, L"Cast Time:"}}},
         {"rest_time", {{Language::Chinese, L"\u4f11\u606f\u65f6\u95f4:"},
                        {Language::English, L"Rest Time:"}}},
         {"timeout_time", {{Language::Chinese, L"\u8d85\u65f6\u65f6\u95f4:"},
                           {Language::English, L"Timeout:"}}},
-        {"disable_bucket_check", {{Language::Chinese, L"\u5173\u95ed\u88c5\u6876\u68c0\u6d4b"},
-                                  {Language::English, L"Disable Bucket Check"}}},
         {"random_cast", {{Language::Chinese, L"\u968f\u673a\u84c4\u529b\u65f6\u95f4"},
                          {Language::English, L"Random Cast Time"}}},
         {"random_max", {{Language::Chinese, L"\u968f\u673a\u6700\u5927\u503c:"},
@@ -168,6 +199,8 @@ std::wstring AutoFishingApp::getText(const std::string& key) {
                   {Language::English, L"Stop"}}},
         {"status", {{Language::Chinese, L"\u72b6\u6001:"},
                     {Language::English, L"Status:"}}},
+        {"cast_runtime", {{Language::Chinese, L"\u672c\u6746\u65f6\u95f4:"},
+                          {Language::English, L"Cast Time:"}}},
         {"statistics", {{Language::Chinese, L"\u7edf\u8ba1\u4fe1\u606f"},
                         {Language::English, L"Statistics"}}},
         {"reels", {{Language::Chinese, L"\u6536\u7aff\u6b21\u6570:"},
@@ -178,8 +211,6 @@ std::wstring AutoFishingApp::getText(const std::string& key) {
                       {Language::English, L"Timeouts:"}}},
         {"runtime", {{Language::Chinese, L"\u8fd0\u884c\u65f6\u95f4:"},
                      {Language::English, L"Runtime:"}}},
-        {"tray_tooltip", {{Language::Chinese, L"VRChat \u81ea\u52a8\u9493\u9c7c v1.1"},
-                          {Language::English, L"VRChat Auto Fishing v1.1"}}},
         {"hotkeys", {{Language::Chinese, L"\u5feb\u6377\u952e: Ctrl+F4: \u663e\u793a/\u9690\u85cf  Ctrl+F5: \u5f00\u59cb  Ctrl+F6: \u505c\u6b62  Ctrl+F7: \u91cd\u9493"},
                      {Language::English, L"Hotkeys: Ctrl+F4: Show/Hide  Ctrl+F5: Start  Ctrl+F6: Stop  Ctrl+F7: Restart"}}}
     };
@@ -253,23 +284,17 @@ void AutoFishingApp::createControls() {
     if (hFont) SendMessage(hCastLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
     y += 40;
 
-    hRestCheckbox = CreateWindowW(L"BUTTON", getText("disable_bucket_check").c_str(),
-        WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        10, y, 400, 20, hwnd, (HMENU)IDC_REST_CHECKBOX, nullptr, nullptr);
-    if (hFont) SendMessage(hRestCheckbox, WM_SETFONT, (WPARAM)hFont, TRUE);
-    y += 30;
-
     hRestTimeLabel_title = CreateWindowW(L"STATIC", getText("rest_time").c_str(),
-        WS_CHILD | SW_HIDE, // Initially hidden
+        WS_CHILD | WS_VISIBLE,
         10, y, labelWidth, 20, hwnd, nullptr, nullptr, nullptr);
     if (hFont) SendMessage(hRestTimeLabel_title, WM_SETFONT, (WPARAM)hFont, TRUE);
     hRestSlider = CreateWindowW(TRACKBAR_CLASSW, nullptr,
-        WS_CHILD | TBS_AUTOTICKS | SW_HIDE, // Initially hidden
+        WS_CHILD | WS_VISIBLE | TBS_AUTOTICKS,
         labelWidth + 10, y, sliderWidth, 30, hwnd, (HMENU)IDC_REST_SLIDER, nullptr, nullptr);
     SendMessage(hRestSlider, TBM_SETRANGE, TRUE, MAKELPARAM(1, 100));
     SendMessage(hRestSlider, TBM_SETPOS, TRUE, 5);
     hRestLabel = CreateWindowW(L"STATIC", L"0.5s",
-        WS_CHILD | SS_RIGHT | SW_HIDE, // Initially hidden
+        WS_CHILD | WS_VISIBLE | SS_RIGHT,
         labelWidth + sliderWidth + 20, y, valueWidth, 20, hwnd, (HMENU)IDC_REST_LABEL, nullptr, nullptr);
     if (hFont) SendMessage(hRestLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
     y += 40;
@@ -327,8 +352,14 @@ void AutoFishingApp::createControls() {
     if (hFont) SendMessage(hStatusTitleLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
     hStatusLabel = CreateWindowW(L"STATIC", L"[\u7b49\u5f85]",
         WS_CHILD | WS_VISIBLE,
-        70, y, 400, 20, hwnd, (HMENU)IDC_STATUS_LABEL, nullptr, nullptr);
+        70, y, 190, 20, hwnd, (HMENU)IDC_STATUS_LABEL, nullptr, nullptr);
     if (hFont) SendMessage(hStatusLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+    std::wstring castRuntimeText = getText("cast_runtime") + L"0s";
+    hStatusCastRuntime = CreateWindowW(L"STATIC", castRuntimeText.c_str(),
+        WS_CHILD | WS_VISIBLE | SS_RIGHT,
+        260, y, 190, 20, hwnd, (HMENU)IDC_STATUS_CAST_RUNTIME, nullptr, nullptr);
+    if (hFont) SendMessage(hStatusCastRuntime, WM_SETFONT, (WPARAM)hFont, TRUE);
     y += 30;
 
     HWND hStatsTitle = CreateWindowW(L"STATIC", getText("statistics").c_str(),
@@ -392,19 +423,6 @@ void AutoFishingApp::onCommand(WPARAM wParam, LPARAM lParam) {
     case IDC_START_BUTTON:
         toggle();
         break;
-    case IDC_REST_CHECKBOX:
-        if (event == BN_CLICKED) {
-            restEnabled = (SendMessage(hRestCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
-            // When "Disable Bucket Check" is CHECKED (restEnabled=true):
-            // - Show rest time controls
-            // - Timeout controls always visible (no change)
-            int showRest = restEnabled ? SW_SHOW : SW_HIDE;
-
-            ShowWindow(hRestTimeLabel_title, showRest);
-            ShowWindow(hRestSlider, showRest);
-            ShowWindow(hRestLabel, showRest);
-        }
-        break;
     case IDC_RANDOM_CAST_CHECK:
         if (event == BN_CLICKED) {
             randomCastEnabled = (SendMessage(hRandomCastCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
@@ -414,14 +432,8 @@ void AutoFishingApp::onCommand(WPARAM wParam, LPARAM lParam) {
     case IDC_NO_CAST_CHECKBOX:
         if (event == BN_CLICKED) {
             noCastMode = (SendMessage(hNoCastCheckbox, BM_GETCHECK, 0, 0) == BST_CHECKED);
-            
-            // When no cast mode is enabled, ensure bucket check is enabled (restEnabled = false)
-            if (noCastMode) {
-                restEnabled = false;
-                SendMessage(hRestCheckbox, BM_SETCHECK, BST_UNCHECKED, 0);
-            }
-            
-            // Hide/show cast time related controls and bucket check controls
+
+            // Hide/show cast time related controls
             int showCast = noCastMode ? SW_HIDE : SW_SHOW;
             ShowWindow(hCastTimeLabel, showCast);
             ShowWindow(hCastSlider, showCast);
@@ -430,21 +442,6 @@ void AutoFishingApp::onCommand(WPARAM wParam, LPARAM lParam) {
             ShowWindow(hRandomMaxTitleLabel, showCast);
             ShowWindow(hRandomMaxSlider, showCast);
             ShowWindow(hRandomMaxLabel, showCast);
-            
-            // Also hide bucket check controls when no cast mode is enabled
-            ShowWindow(hRestCheckbox, showCast);
-            // If bucket check is hidden, also hide rest time controls
-            if (noCastMode) {
-                ShowWindow(hRestTimeLabel_title, SW_HIDE);
-                ShowWindow(hRestSlider, SW_HIDE);
-                ShowWindow(hRestLabel, SW_HIDE);
-            } else {
-                // Restore rest time controls visibility based on restEnabled
-                int showRest = restEnabled ? SW_SHOW : SW_HIDE;
-                ShowWindow(hRestTimeLabel_title, showRest);
-                ShowWindow(hRestSlider, showRest);
-                ShowWindow(hRestLabel, showRest);
-            }
         }
         break;
     }
@@ -489,6 +486,16 @@ void AutoFishingApp::toggle() {
 
     if (running) {
         firstCast = true;
+        castCycleId_ = 0;
+        fishPickupDetected_ = false;
+        clearDeferredBucketTracking();
+        auto nowSteady = std::chrono::steady_clock::now();
+        auto nowWall = std::chrono::system_clock::now();
+        waitHookStartedAt_ = nowSteady;
+        waitHookStartedWallAt_ = nowWall;
+        currentCycleStartedAt_ = nowSteady;
+        lastHookSavedEventAt_ = nowWall - std::chrono::seconds(60);
+        lastBucketSavedAt_ = nowWall - std::chrono::seconds(60);
         currentAction = "Starting";
         reelTimeoutFlag_ = false;
         {
@@ -503,6 +510,8 @@ void AutoFishingApp::toggle() {
     else {
         timeoutId++;
         reelTimeoutId_++;
+        clearDeferredBucketTracking();
+        fishPickupDetected_ = false;
         emergencyRelease();
         {
             std::lock_guard<std::mutex> lock(statsMutex);
@@ -560,10 +569,13 @@ void AutoFishingApp::updateTrayIcon() {
 void AutoFishingApp::updateStats() {
     std::lock_guard<std::mutex> lock(statsMutex);
     
+    int castSeconds = 0;
     if (running) {
         auto now = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - stats.startTime);
         int seconds = (int)duration.count();
+        castSeconds = (int)std::chrono::duration_cast<std::chrono::seconds>(now - currentCycleStartedAt_).count();
+        if (castSeconds < 0) castSeconds = 0;
         
         std::wstringstream ss;
         if (seconds >= 60) {
@@ -577,6 +589,10 @@ void AutoFishingApp::updateStats() {
     SetWindowTextW(hStatsReels, std::to_wstring(stats.reels).c_str());
     SetWindowTextW(hStatsBucket, std::to_wstring(stats.bucketSuccess).c_str());
     SetWindowTextW(hStatsTimeouts, std::to_wstring(stats.timeouts).c_str());
+
+    std::wstringstream castSs;
+    castSs << getText("cast_runtime") << castSeconds << L"s";
+    SetWindowTextW(hStatusCastRuntime, castSs.str().c_str());
 }
 
 void AutoFishingApp::updateStatsLoop() {
@@ -607,12 +623,18 @@ double AutoFishingApp::getCastDuration() {
 void AutoFishingApp::performCast() {
     if (!running) return;
 
+    maybeRecoverMissingBucket();
+
     if (firstCast) {
         firstCast = false;
     }
 
-    // If no cast mode is enabled, skip the casting action and go directly to waiting for fish
+    castCycleId_++;
+    currentCycleStartedAt_ = std::chrono::steady_clock::now();
+
     if (noCastMode) {
+        waitHookStartedAt_ = std::chrono::steady_clock::now();
+        waitHookStartedWallAt_ = std::chrono::system_clock::now();
         currentAction = "WaitingFish";
         updateStatus(currentAction);
         startTimeoutTimer();
@@ -633,13 +655,15 @@ void AutoFishingApp::performCast() {
     if (!running) return;
 
     lastCastTime_ = std::chrono::steady_clock::now();
+    waitHookStartedAt_ = std::chrono::steady_clock::now();
+    waitHookStartedWallAt_ = std::chrono::system_clock::now();
     currentAction = "WaitingFish";
     updateStatus(currentAction);
     startTimeoutTimer();
     std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(FishingConfig::CAST_WAIT_TIME * 1000)));
 }
 
-void AutoFishingApp::performReel(bool isTimeout) {
+bool AutoFishingApp::performReel(bool isTimeout) {
     currentAction = "Reeling";
     updateStatus(currentAction);
     {
@@ -652,6 +676,8 @@ void AutoFishingApp::performReel(bool isTimeout) {
     startReelTimeoutTimer();
 
     sendClick(true);
+
+    bool confirmed = false;
 
     if (isTimeout) {
         auto reelStart = std::chrono::steady_clock::now();
@@ -672,11 +698,14 @@ void AutoFishingApp::performReel(bool isTimeout) {
             if (remaining > 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(remaining * 1000)));
             }
+            confirmed = true;
         }
     }
 
     reelTimeoutId_++;
+    fishPickupDetected_ = false;
     sendClick(false);
+    return confirmed;
 }
 
 void AutoFishingApp::startReelTimeoutTimer() {
@@ -699,7 +728,7 @@ void AutoFishingApp::handleReelTimeout() {
 
 bool AutoFishingApp::checkFishPickup() {
     auto startTime = std::chrono::steady_clock::now();
-    bool detected = false;
+    auto waitStartWithTolerance = waitHookStartedWallAt_ - std::chrono::milliseconds(200);
 
     while (running && !reelTimeoutFlag_) {
         auto now = std::chrono::steady_clock::now();
@@ -709,27 +738,43 @@ bool AutoFishingApp::checkFishPickup() {
             break;
         }
 
-        std::string content = logHandler->safeReadFile();
-        if (content.find(VRChatLogHandler::FISH_PICKUP_KEYWORD) != std::string::npos) {
-            if (!detected) {
-                detectedTime = std::chrono::steady_clock::now();
-                detected = true;
+        if (fishPickupDetected_) {
+            detectedTime = fishPickupDetectedAt_;
+            return true;
+        }
+
+        // Fallback detection: incremental stream + tail snapshot to reduce missed Toggles(True).
+        std::string contentStream = logHandler ? logHandler->safeReadFile() : "";
+        std::string contentTail = logHandler ? logHandler->readTail() : "";
+        std::string merged = contentStream;
+        if (!contentTail.empty()) {
+            if (!merged.empty()) {
+                merged += "\n";
+            }
+            merged += contentTail;
+        }
+
+        if (!merged.empty()) {
+            std::istringstream stream(merged);
+            std::string line;
+            while (std::getline(stream, line)) {
+                if (!line.empty() && line.back() == '\r') {
+                    line.pop_back();
+                }
+                if (line.find(VRChatLogHandler::FISH_PICKUP_KEYWORD) == std::string::npos) {
+                    continue;
+                }
+                auto eventTime = extractLogTimestamp(line);
+                if (eventTime && *eventTime >= waitStartWithTolerance) {
+                    detectedTime = std::chrono::steady_clock::now();
+                    fishPickupDetected_ = true;
+                    fishPickupDetectedAt_ = detectedTime;
+                    return true;
+                }
             }
         }
 
-        if (detected) {
-            auto detectedElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - detectedTime).count() / 1000.0;
-            if (detectedElapsed >= FishingConfig::FISH_PICKUP_WAIT_TIME) {
-                return true;
-            }
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(FishingConfig::PICKUP_CHECK_INTERVAL * 1000)));
-    }
-
-    if (!running || reelTimeoutFlag_) {
-        return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
     return false;
@@ -770,7 +815,7 @@ void AutoFishingApp::forceReel() {
     if (protected_ || !running) return;
 
     ProtectedGuard guard(protected_);
-    performReel(true);
+    (void)performReel(true);
 
     if (!running) return;
 
@@ -786,10 +831,10 @@ void AutoFishingApp::forceReel() {
 void AutoFishingApp::onLogEvent(LogEventType eventType, const std::string& line) {
     switch (eventType) {
         case LogEventType::FishOnHook:
-            fishOnHook();
+            fishOnHook(line);
             break;
         case LogEventType::FishPickup:
-            fishPickup();
+            fishPickup(line);
             break;
         case LogEventType::BucketSave:
             bucketSave();
@@ -797,45 +842,154 @@ void AutoFishingApp::onLogEvent(LogEventType eventType, const std::string& line)
     }
 }
 
-void AutoFishingApp::fishOnHook() {
+std::optional<std::chrono::system_clock::time_point> AutoFishingApp::extractLogTimestamp(const std::string& line) const {
+    static const std::regex kLineTimePattern(R"((\d{4})\.(\d{2})\.(\d{2}) (\d{2}):(\d{2}):(\d{2}))");
+    std::smatch match;
+    if (!std::regex_search(line, match, kLineTimePattern) || match.size() < 7) {
+        return std::nullopt;
+    }
+
+    std::tm tmValue{};
+    tmValue.tm_year = std::stoi(match[1].str()) - 1900;
+    tmValue.tm_mon = std::stoi(match[2].str()) - 1;
+    tmValue.tm_mday = std::stoi(match[3].str());
+    tmValue.tm_hour = std::stoi(match[4].str());
+    tmValue.tm_min = std::stoi(match[5].str());
+    tmValue.tm_sec = std::stoi(match[6].str());
+    tmValue.tm_isdst = -1;
+
+    std::time_t localTime = std::mktime(&tmValue);
+    if (localTime == static_cast<std::time_t>(-1)) {
+        return std::nullopt;
+    }
+    return std::chrono::system_clock::from_time_t(localTime);
+}
+
+bool AutoFishingApp::tryConsumeDeferredBucket(const std::string& line) {
+    if (!running || pendingBucketCycleId_ <= 0 || line.empty()) {
+        return false;
+    }
+
+    if (line.find(VRChatLogHandler::FISH_HOOK_KEYWORD) == std::string::npos) {
+        return false;
+    }
+
+    auto eventTime = extractLogTimestamp(line);
+    if (!eventTime || *eventTime < pendingBucketMinEventAt_) {
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(statsMutex);
+        stats.bucketSuccess++;
+    }
+    updateStats();
+
+    lastBucketSavedAt_ = *eventTime;
+    clearDeferredBucketTracking();
+    return true;
+}
+
+void AutoFishingApp::startDeferredBucketTracking(int cycleId, const std::optional<std::chrono::system_clock::time_point>& minEventAt) {
+    pendingBucketCycleId_ = cycleId;
+    pendingBucketRetry_ = 0;
+    pendingBucketStartedAt_ = std::chrono::steady_clock::now();
+    pendingBucketMinEventAt_ = minEventAt.value_or(std::chrono::system_clock::time_point{});
+}
+
+void AutoFishingApp::clearDeferredBucketTracking() {
+    pendingBucketCycleId_ = 0;
+    pendingBucketRetry_ = 0;
+    pendingBucketStartedAt_ = std::chrono::steady_clock::now();
+    pendingBucketMinEventAt_ = std::chrono::system_clock::time_point{};
+}
+
+void AutoFishingApp::maybeRecoverMissingBucket() {
+    if (!running || pendingBucketCycleId_ <= 0) {
+        return;
+    }
+
     auto now = std::chrono::steady_clock::now();
-    
-    auto elapsedSinceCast = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now - lastCastTime_).count() / 1000.0;
-    if (elapsedSinceCast < FishingConfig::DEBOUNCE_AFTER_CAST) {
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - pendingBucketStartedAt_).count() / 1000.0;
+    if (elapsed < FishingConfig::BUCKET_SAVE_TIMEOUT_SECONDS) {
         return;
     }
-    
+
+    if (pendingBucketRetry_ >= FishingConfig::BUCKET_RECOVERY_MAX_RETRY) {
+        clearDeferredBucketTracking();
+        return;
+    }
+
+    pendingBucketRetry_++;
+    sendClick(true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    sendClick(false);
+    pendingBucketStartedAt_ = std::chrono::steady_clock::now();
+}
+
+void AutoFishingApp::fishOnHook(const std::string& line) {
+    if (tryConsumeDeferredBucket(line)) {
+        return;
+    }
+
+    auto eventTime = extractLogTimestamp(line);
+    if (!eventTime) {
+        return;
+    }
+
+    auto nowSteady = std::chrono::steady_clock::now();
+
     auto elapsedSinceCycle = std::chrono::duration_cast<std::chrono::seconds>(
-        now - lastCycleEnd).count();
-    
-    if (!running) {
+        nowSteady - lastCycleEnd).count();
+
+    if (!running || protected_ || currentAction != "WaitingFish" || elapsedSinceCycle < FishingConfig::CYCLE_COOLDOWN) {
         return;
     }
-    if (protected_) {
+
+    auto sinceWait = std::chrono::duration_cast<std::chrono::milliseconds>(nowSteady - waitHookStartedAt_).count() / 1000.0;
+    if (sinceWait < FishingConfig::HOOK_MIN_WAIT_SECONDS) {
         return;
     }
-    if (elapsedSinceCycle < FishingConfig::CYCLE_COOLDOWN) {
+
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(*eventTime - lastBucketSavedAt_).count() / 1000.0
+        <= FishingConfig::BUCKET_EVENT_COOLDOWN_SECONDS) {
+        return;
+    }
+
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(*eventTime - lastHookSavedEventAt_).count() / 1000.0
+        <= FishingConfig::SAVED_DATA_CLUSTER_SECONDS) {
+        return;
+    }
+
+    auto waitStartWithTolerance = waitHookStartedWallAt_ - std::chrono::milliseconds(200);
+    if (*eventTime < waitStartWithTolerance) {
         return;
     }
 
     ProtectedGuard guard(protected_);
     timeoutId++;
     lastCycleEnd = std::chrono::steady_clock::now();
-    performReel();
+    lastHookSavedEventAt_ = *eventTime;
+    fishPickupDetected_ = false;
+    bool reelConfirmed = performReel(false);
 
     if (!running) return;
 
-    if (restEnabled) {
+    if (!reelConfirmed) {
         currentAction = "Resting";
         updateStatus(currentAction);
-        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(restTime * 1000)));
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        if (running) {
+            performCast();
+        }
+        lastCycleEnd = std::chrono::steady_clock::now();
+        return;
     }
-    else {
-        currentAction = "WaitingBucket";
-        updateStatus(currentAction);
-        waitForFishBucket();
-    }
+
+    startDeferredBucketTracking(castCycleId_, eventTime);
+    currentAction = "Resting";
+    updateStatus(currentAction);
+    std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(restTime * 1000)));
 
     if (running) {
         performCast();
@@ -844,36 +998,24 @@ void AutoFishingApp::fishOnHook() {
     lastCycleEnd = std::chrono::steady_clock::now();
 }
 
-void AutoFishingApp::fishPickup() {
+void AutoFishingApp::fishPickup(const std::string& line) {
+    if (!running || currentAction != "Reeling") {
+        return;
+    }
+
+    auto eventTime = extractLogTimestamp(line);
+    if (eventTime) {
+        auto waitStartWithTolerance = waitHookStartedWallAt_ - std::chrono::milliseconds(200);
+        if (*eventTime < waitStartWithTolerance) {
+            return;
+        }
+    }
+
+    fishPickupDetectedAt_ = std::chrono::steady_clock::now();
+    fishPickupDetected_ = true;
 }
 
 void AutoFishingApp::bucketSave() {
-}
-
-void AutoFishingApp::waitForFishBucket() {
-    auto waitStart = std::chrono::steady_clock::now();
-
-    while (running) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(FishingConfig::BUCKET_CHECK_INTERVAL * 1000)));
-        
-        std::string content = logHandler->safeReadFile();
-        if (content.find(VRChatLogHandler::BUCKET_SAVE_KEYWORD) != std::string::npos) {
-            // std::cout << "Fish bucketed" << std::endl;
-            {
-                std::lock_guard<std::mutex> lock(statsMutex);
-                stats.bucketSuccess++;
-            }
-            updateStats();
-            break;
-        }
-
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - waitStart).count();
-        if (elapsed > FishingConfig::BUCKET_WAIT_TIMEOUT) {
-            // std::cout << "Bucket timeout" << std::endl;
-            break;
-        }
-    }
 }
 
 void AutoFishingApp::startFishing() {
@@ -943,7 +1085,6 @@ void AutoFishingApp::loadConfig() {
         castTime = config.value("castTime", FishingConfig::DEFAULT_CAST_TIME);
         restTime = config.value("restTime", FishingConfig::DEFAULT_REST_TIME);
         timeoutLimit = config.value("timeoutLimit", FishingConfig::DEFAULT_TIMEOUT_MINUTES);
-        restEnabled = config.value("restEnabled", false);
         randomCastEnabled = config.value("randomCastEnabled", false);
         randomCastMax = config.value("randomCastMax", 1.0);
         noCastMode = config.value("noCastMode", false);
@@ -954,12 +1095,6 @@ void AutoFishingApp::loadConfig() {
         SendMessage(hTimeoutSlider, TBM_SETPOS, TRUE, static_cast<int>(timeoutLimit * 10));
         SendMessage(hRandomMaxSlider, TBM_SETPOS, TRUE, static_cast<int>(randomCastMax * 10));
         
-        // If no cast mode is enabled, ensure bucket check is enabled
-        if (noCastMode) {
-            restEnabled = false;
-        }
-        
-        SendMessage(hRestCheckbox, BM_SETCHECK, restEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
         SendMessage(hRandomCastCheck, BM_SETCHECK, randomCastEnabled ? BST_CHECKED : BST_UNCHECKED, 0);
         SendMessage(hNoCastCheckbox, BM_SETCHECK, noCastMode ? BST_CHECKED : BST_UNCHECKED, 0);
         
@@ -975,28 +1110,11 @@ void AutoFishingApp::loadConfig() {
         ShowWindow(hRandomMaxSlider, showCast);
         ShowWindow(hRandomMaxLabel, showCast);
         
-        // Also hide bucket check controls when no cast mode is enabled
-        ShowWindow(hRestCheckbox, showCast);
-
         // Manually trigger update for labels
         onHScroll(0, (LPARAM)hCastSlider);
         onHScroll(0, (LPARAM)hRestSlider);
         onHScroll(0, (LPARAM)hTimeoutSlider);
         onHScroll(0, (LPARAM)hRandomMaxSlider);
-
-        // Update visibility based on loaded config
-        // If no cast mode is enabled, hide rest time controls
-        // Otherwise, show/hide based on restEnabled
-        if (noCastMode) {
-            ShowWindow(hRestTimeLabel_title, SW_HIDE);
-            ShowWindow(hRestSlider, SW_HIDE);
-            ShowWindow(hRestLabel, SW_HIDE);
-        } else {
-            int showRest = restEnabled ? SW_SHOW : SW_HIDE;
-            ShowWindow(hRestTimeLabel_title, showRest);
-            ShowWindow(hRestSlider, showRest);
-            ShowWindow(hRestLabel, showRest);
-        }
 
     } catch (const json::parse_error& e) {
         (void)e; // Mark as unused to prevent warning
@@ -1009,7 +1127,6 @@ void AutoFishingApp::saveConfig() {
     config["castTime"] = castTime;
     config["restTime"] = restTime;
     config["timeoutLimit"] = timeoutLimit;
-    config["restEnabled"] = restEnabled;
     config["randomCastEnabled"] = randomCastEnabled;
     config["randomCastMax"] = randomCastMax;
     config["noCastMode"] = noCastMode;

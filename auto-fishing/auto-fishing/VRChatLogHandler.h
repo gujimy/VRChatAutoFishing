@@ -31,6 +31,7 @@ public:
     void startMonitor();
     void stop();
     std::string safeReadFile();
+    std::string readTail(size_t maxBytes = 131072);
     std::string getCurrentLogPath() const;
     bool isRunning() const noexcept { return running_.load(std::memory_order_acquire); }
 
