@@ -49,6 +49,8 @@ enum class Language {
 
 // Tray Icon Message
 #define WM_TRAYICON (WM_USER + 1)
+#define WM_APP_UPDATE_STATUS (WM_APP + 10)
+#define WM_APP_UPDATE_STATS  (WM_APP + 11)
 
 class AutoFishingApp {
 private:
@@ -93,14 +95,24 @@ private:
     std::thread fishingThread;
     std::thread timeoutThread;
     std::thread reelTimeoutThread_;
+    std::thread restartThread_;
     std::thread statsThread;
     std::mutex statsMutex;
+    mutable std::mutex actionMutex_;
+    mutable std::mutex stateMutex_;
+    std::mutex timerThreadMutex_;
+    std::mutex lifecycleMutex_;
     std::atomic<int> timeoutId;
     std::atomic<int> reelTimeoutId_;
+    std::atomic<int> activeWorkers_;
+    std::atomic<bool> restartInProgress_{ false };
+    std::atomic<bool> castRequested_{ false };
+    DWORD uiThreadId_;
     bool firstCast;
     int castCycleId_;
     int pendingBucketCycleId_;
     int pendingBucketRetry_;
+    bool pendingBucketSawAttempt_;
     std::chrono::steady_clock::time_point waitHookStartedAt_;
     std::chrono::steady_clock::time_point currentCycleStartedAt_;
     std::chrono::steady_clock::time_point pendingBucketStartedAt_;
@@ -118,21 +130,27 @@ private:
         std::chrono::steady_clock::time_point startTime;
     } stats;
 
-    double castTime;
-    double restTime;
-    double timeoutLimit;
-    bool randomCastEnabled;
-    double randomCastMax;
-    bool noCastMode;
+    std::atomic<double> castTime;
+    std::atomic<double> restTime;
+    std::atomic<double> timeoutLimit;
+    std::atomic<bool> randomCastEnabled;
+    std::atomic<double> randomCastMax;
+    std::atomic<bool> noCastMode;
     std::chrono::steady_clock::time_point detectedTime;
 
     void createControls();
+    std::string getCurrentAction() const;
+    void applyStatusUI();
+    void applyStatsUI();
+    bool sleepInterruptible(int totalMs, int stepMs = 100, bool stopOnNotRunning = false);
     void updateStatus(const std::string& status);
     void updateTrayIcon();
     void updateStats();
     void updateStatsLoop();
     void sendClick(bool press);
     double getCastDuration();
+    void fishingLoop();
+    void requestCast();
     void performCast();
     bool performReel(bool isTimeout = false);
     void forceReel();
@@ -144,7 +162,7 @@ private:
     bool tryConsumeDeferredBucket(const std::string& line);
     void startDeferredBucketTracking(int cycleId, const std::optional<std::chrono::system_clock::time_point>& minEventAt);
     void clearDeferredBucketTracking();
-    void maybeRecoverMissingBucket();
+    bool maybeRecoverMissingBucket();
     std::optional<std::chrono::system_clock::time_point> extractLogTimestamp(const std::string& line) const;
     void startTimeoutTimer();
     void handleTimeout();

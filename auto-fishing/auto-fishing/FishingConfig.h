@@ -16,7 +16,7 @@ public:
 
     // Detection related constants
     static constexpr double FISH_PICKUP_WAIT_TIME = 2.0;
-    static constexpr double FISH_PICKUP_TIMEOUT = 16.0;
+    static constexpr double FISH_PICKUP_TIMEOUT = 30.0;
     static constexpr double BUCKET_WAIT_TIMEOUT = 10.0;
     static constexpr double TIMEOUT_REEL_WAIT = 10.0;
     static constexpr double RESTART_WAIT_TIME = 2.5;
@@ -36,8 +36,7 @@ public:
     static constexpr double HOOK_MIN_WAIT_SECONDS = 4.0;
     static constexpr double SAVED_DATA_CLUSTER_SECONDS = 7.0;
     static constexpr double BUCKET_EVENT_COOLDOWN_SECONDS = 3.0;
-    static constexpr double BUCKET_SAVE_TIMEOUT_SECONDS = 3.0;
-    static constexpr int BUCKET_RECOVERY_MAX_RETRY = 2;
+    static constexpr double BUCKET_SAVE_TIMEOUT_SECONDS = 5.0;
     static constexpr double DEBOUNCE_AFTER_CAST = 3.0;
 
     static constexpr const char* VERSION = "1.2";

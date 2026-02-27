@@ -208,6 +208,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             g_pApp->onTimer(wParam);
         }
         break;
+    case WM_APP_UPDATE_STATUS:
+    case WM_APP_UPDATE_STATS:
+        if (g_pApp) {
+            g_pApp->onTimer(message);
+        }
+        break;
     case WM_PAINT:
         {
             PAINTSTRUCT ps;
